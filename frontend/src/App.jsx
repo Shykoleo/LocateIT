@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -13,6 +13,24 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
+/* ✅ NEW: Proper map click handler */
+function MapClickHandler({ setNewAsset }) {
+  useMapEvents({
+    click(e) {
+      const lat = Number(e.latlng.lat.toFixed(6));
+      const lng = Number(e.latlng.lng.toFixed(6));
+
+      setNewAsset((prev) => ({
+        ...prev,
+        latitude: lat,
+        longitude: lng,
+      }));
+    },
+  });
+
+  return null;
+}
+
 export default function App() {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,44 +38,55 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState("");
 
+  const [newAsset, setNewAsset] = useState({
+    name: "",
+    asset_type: "",
+    status: "available",
+    building: "",
+    room: "",
+    latitude: "",
+    longitude: "",
+  });
+
   const mapRef = useRef(null);
   const markerRefs = useRef({});
 
   useEffect(() => {
-    async function loadAssets() {
-      try {
-        setLoading(true);
-        setErrorMsg("");
-
-        const res = await fetch("http://127.0.0.1:8000/api/assets/");
-
-        if (!res.ok) {
-          throw new Error(`API error: ${res.status}`);
-        }
-
-        const data = await res.json();
-        setAssets(Array.isArray(data) ? data : []);
-      } catch (err) {
-        console.error(err);
-        setErrorMsg("Failed to load assets.");
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadAssets();
   }, []);
+
+  async function loadAssets() {
+    try {
+      setLoading(true);
+      setErrorMsg("");
+
+      const res = await fetch("http://127.0.0.1:8000/api/assets/");
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setAssets(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Failed to load assets.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const filteredAssets = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return assets;
 
-    return assets.filter((asset) =>
-      asset.name.toLowerCase().includes(q) ||
-      asset.asset_type.toLowerCase().includes(q) ||
-      asset.status.toLowerCase().includes(q) ||
-      asset.building.toLowerCase().includes(q) ||
-      asset.room.toLowerCase().includes(q)
+    return assets.filter(
+      (asset) =>
+        (asset.name || "").toLowerCase().includes(q) ||
+        (asset.asset_type || "").toLowerCase().includes(q) ||
+        (asset.status || "").toLowerCase().includes(q) ||
+        (asset.building || "").toLowerCase().includes(q) ||
+        (asset.room || "").toLowerCase().includes(q),
     );
   }, [assets, query]);
 
@@ -79,6 +108,53 @@ export default function App() {
     }, 200);
   };
 
+  async function addAsset(e) {
+    e.preventDefault();
+
+    const lat = parseFloat(newAsset.latitude);
+    const lng = parseFloat(newAsset.longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      alert("Please enter valid latitude and longitude.");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/assets/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...newAsset,
+          latitude: lat,
+          longitude: lng,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to add asset.");
+      }
+
+      const createdAsset = await res.json();
+
+      setAssets((prevAssets) => [...prevAssets, createdAsset]);
+
+      setNewAsset({
+        name: "",
+        asset_type: "",
+        status: "available",
+        building: "",
+        room: "",
+        latitude: "",
+        longitude: "",
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Failed to add asset. Please check the form.");
+    }
+  }
+
   return (
     <div style={{ height: "100%", width: "100%" }}>
       <div
@@ -96,7 +172,7 @@ export default function App() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "320px 1fr",
+          gridTemplateColumns: "360px 1fr",
           height: "calc(100% - 49px)",
         }}
       >
@@ -109,24 +185,31 @@ export default function App() {
             color: "white",
           }}
         >
-          <h3 style={{ marginTop: 0 }}>Assets</h3>
+          <h3 style={{ marginTop: 0 }}>Add New Asset</h3>
 
-          <input
-            type="text"
-            placeholder="Search assets..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "10px",
-              marginBottom: "12px",
-              borderRadius: "8px",
-              border: "1px solid #555",
-              background: "#1a1a1a",
-              color: "white",
-              boxSizing: "border-box",
-            }}
-          />
+          <form onSubmit={addAsset} style={{ marginBottom: "20px" }}>
+            <input type="text" placeholder="Asset name" value={newAsset.name} onChange={(e) => setNewAsset({ ...newAsset, name: e.target.value })} style={inputStyle} required />
+            <input type="text" placeholder="Asset type" value={newAsset.asset_type} onChange={(e) => setNewAsset({ ...newAsset, asset_type: e.target.value })} style={inputStyle} required />
+
+            <select value={newAsset.status} onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value })} style={inputStyle}>
+              <option value="available">Available</option>
+              <option value="in_use">In Use</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="lost">Lost</option>
+            </select>
+
+            <input type="text" placeholder="Building" value={newAsset.building} onChange={(e) => setNewAsset({ ...newAsset, building: e.target.value })} style={inputStyle} />
+            <input type="text" placeholder="Room" value={newAsset.room} onChange={(e) => setNewAsset({ ...newAsset, room: e.target.value })} style={inputStyle} />
+
+            <input type="number" step="any" placeholder="Latitude" value={newAsset.latitude || ""} onChange={(e) => setNewAsset({ ...newAsset, latitude: e.target.value })} style={inputStyle} required />
+            <input type="number" step="any" placeholder="Longitude" value={newAsset.longitude || ""} onChange={(e) => setNewAsset({ ...newAsset, longitude: e.target.value })} style={inputStyle} required />
+
+            <button type="submit" style={buttonStyle}>Add Asset</button>
+          </form>
+
+          <h3>Assets</h3>
+
+          <input type="text" placeholder="Search assets..." value={query} onChange={(e) => setQuery(e.target.value)} style={inputStyle} />
 
           {loading && <p>Loading assets...</p>}
           {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
@@ -136,18 +219,14 @@ export default function App() {
           )}
 
           {filteredAssets.map((asset) => (
-            <div
-              key={asset.id}
-              onClick={() => focusAsset(asset)}
-              style={{
-                padding: "12px",
-                marginBottom: "10px",
-                borderRadius: "10px",
-                background: selectedId === asset.id ? "#353f6b" : "#2c2c2c",
-                border: selectedId === asset.id ? "1px solid #6c7bff" : "1px solid #444",
-                cursor: "pointer",
-              }}
-            >
+            <div key={asset.id} onClick={() => focusAsset(asset)} style={{
+              padding: "12px",
+              marginBottom: "10px",
+              borderRadius: "10px",
+              background: selectedId === asset.id ? "#353f6b" : "#2c2c2c",
+              border: selectedId === asset.id ? "1px solid #6c7bff" : "1px solid #444",
+              cursor: "pointer",
+            }}>
               <div style={{ fontWeight: "bold" }}>{asset.name}</div>
               <div style={{ fontSize: "14px", opacity: 0.9 }}>
                 {asset.asset_type} • {asset.status}
@@ -164,12 +243,11 @@ export default function App() {
             center={[51.4816, -3.1791]}
             zoom={15}
             style={{ height: "100%", width: "100%" }}
-            ref={mapRef}
           >
-            <TileLayer
-              attribution="&copy; OpenStreetMap contributors"
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+            {/* ✅ THIS FIXES AUTO FILL */}
+            <MapClickHandler setNewAsset={setNewAsset} />
 
             {assets.map((asset) => (
               <Marker
@@ -198,3 +276,25 @@ export default function App() {
     </div>
   );
 }
+
+const inputStyle = {
+  width: "100%",
+  padding: "10px",
+  marginBottom: "10px",
+  borderRadius: "8px",
+  border: "1px solid #555",
+  background: "#1a1a1a",
+  color: "white",
+  boxSizing: "border-box",
+};
+
+const buttonStyle = {
+  width: "100%",
+  padding: "10px",
+  borderRadius: "8px",
+  border: "none",
+  background: "#646cff",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+};
