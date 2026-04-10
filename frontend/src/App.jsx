@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -155,6 +161,67 @@ export default function App() {
     }
   }
 
+  async function deleteAsset(assetId) {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this asset?",
+    );
+    if (!confirmDelete) return;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to delete asset.");
+      }
+
+      setAssets((prevAssets) =>
+        prevAssets.filter((asset) => asset.id !== assetId),
+      );
+
+      if (selectedId === assetId) {
+        setSelectedId(null);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete asset.");
+    }
+  }
+
+  async function updateAssetStatus(assetId, newStatus) {
+    try {
+      const assetToUpdate = assets.find((asset) => asset.id === assetId);
+      if (!assetToUpdate) return;
+
+      const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...assetToUpdate,
+          status: newStatus,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to update asset.");
+      }
+
+      const updatedAsset = await res.json();
+
+      setAssets((prevAssets) =>
+        prevAssets.map((asset) =>
+          asset.id === assetId ? updatedAsset : asset,
+        ),
+      );
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update asset.");
+    }
+  }
+
   return (
     <div style={{ height: "100%", width: "100%" }}>
       <div
@@ -188,28 +255,96 @@ export default function App() {
           <h3 style={{ marginTop: 0 }}>Add New Asset</h3>
 
           <form onSubmit={addAsset} style={{ marginBottom: "20px" }}>
-            <input type="text" placeholder="Asset name" value={newAsset.name} onChange={(e) => setNewAsset({ ...newAsset, name: e.target.value })} style={inputStyle} required />
-            <input type="text" placeholder="Asset type" value={newAsset.asset_type} onChange={(e) => setNewAsset({ ...newAsset, asset_type: e.target.value })} style={inputStyle} required />
+            <input
+              type="text"
+              placeholder="Asset name"
+              value={newAsset.name}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, name: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
+            <input
+              type="text"
+              placeholder="Asset type"
+              value={newAsset.asset_type}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, asset_type: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
 
-            <select value={newAsset.status} onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value })} style={inputStyle}>
+            <select
+              value={newAsset.status}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, status: e.target.value })
+              }
+              style={inputStyle}
+            >
               <option value="available">Available</option>
               <option value="in_use">In Use</option>
               <option value="maintenance">Maintenance</option>
               <option value="lost">Lost</option>
             </select>
 
-            <input type="text" placeholder="Building" value={newAsset.building} onChange={(e) => setNewAsset({ ...newAsset, building: e.target.value })} style={inputStyle} />
-            <input type="text" placeholder="Room" value={newAsset.room} onChange={(e) => setNewAsset({ ...newAsset, room: e.target.value })} style={inputStyle} />
+            <input
+              type="text"
+              placeholder="Building"
+              value={newAsset.building}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, building: e.target.value })
+              }
+              style={inputStyle}
+            />
+            <input
+              type="text"
+              placeholder="Room"
+              value={newAsset.room}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, room: e.target.value })
+              }
+              style={inputStyle}
+            />
 
-            <input type="number" step="any" placeholder="Latitude" value={newAsset.latitude || ""} onChange={(e) => setNewAsset({ ...newAsset, latitude: e.target.value })} style={inputStyle} required />
-            <input type="number" step="any" placeholder="Longitude" value={newAsset.longitude || ""} onChange={(e) => setNewAsset({ ...newAsset, longitude: e.target.value })} style={inputStyle} required />
+            <input
+              type="number"
+              step="any"
+              placeholder="Latitude"
+              value={newAsset.latitude || ""}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, latitude: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
+            <input
+              type="number"
+              step="any"
+              placeholder="Longitude"
+              value={newAsset.longitude || ""}
+              onChange={(e) =>
+                setNewAsset({ ...newAsset, longitude: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
 
-            <button type="submit" style={buttonStyle}>Add Asset</button>
+            <button type="submit" style={buttonStyle}>
+              Add Asset
+            </button>
           </form>
 
           <h3>Assets</h3>
 
-          <input type="text" placeholder="Search assets..." value={query} onChange={(e) => setQuery(e.target.value)} style={inputStyle} />
+          <input
+            type="text"
+            placeholder="Search assets..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={inputStyle}
+          />
 
           {loading && <p>Loading assets...</p>}
           {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
@@ -219,21 +354,67 @@ export default function App() {
           )}
 
           {filteredAssets.map((asset) => (
-            <div key={asset.id} onClick={() => focusAsset(asset)} style={{
-              padding: "12px",
-              marginBottom: "10px",
-              borderRadius: "10px",
-              background: selectedId === asset.id ? "#353f6b" : "#2c2c2c",
-              border: selectedId === asset.id ? "1px solid #6c7bff" : "1px solid #444",
-              cursor: "pointer",
-            }}>
+            <div
+              key={asset.id}
+              onClick={() => focusAsset(asset)}
+              style={{
+                padding: "12px",
+                marginBottom: "10px",
+                borderRadius: "10px",
+                background: selectedId === asset.id ? "#353f6b" : "#2c2c2c",
+                border:
+                  selectedId === asset.id
+                    ? "1px solid #6c7bff"
+                    : "1px solid #444",
+                cursor: "pointer",
+              }}
+            >
               <div style={{ fontWeight: "bold" }}>{asset.name}</div>
               <div style={{ fontSize: "14px", opacity: 0.9 }}>
                 {asset.asset_type} • {asset.status}
               </div>
-              <div style={{ fontSize: "13px", opacity: 0.8 }}>
+              <div
+                style={{ fontSize: "13px", opacity: 0.8, marginBottom: "10px" }}
+              >
                 {asset.building} {asset.room ? `• ${asset.room}` : ""}
               </div>
+              <select
+                value={asset.status}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  marginBottom: "8px",
+                  borderRadius: "6px",
+                  border: "1px solid #555",
+                  background: "#1a1a1a",
+                  color: "white",
+                }}
+              >
+                <option value="available">Available</option>
+                <option value="in_use">In Use</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="lost">Lost</option>
+              </select>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteAsset(asset.id);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#c0392b",
+                  color: "white",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                Delete
+              </button>
             </div>
           ))}
         </div>
