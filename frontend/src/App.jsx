@@ -180,6 +180,8 @@ export default function App() {
         prevAssets.filter((asset) => asset.id !== assetId),
       );
 
+      alert("Asset deleted successfully");
+
       if (selectedId === assetId) {
         setSelectedId(null);
       }
@@ -210,6 +212,8 @@ export default function App() {
       }
 
       const updatedAsset = await res.json();
+
+      alert("Asset updated successfully");
 
       setAssets((prevAssets) =>
         prevAssets.map((asset) =>
