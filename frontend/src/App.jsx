@@ -1,11 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  useMapEvents,
-} from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -19,7 +13,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-/* ✅ NEW: Proper map click handler */
 function MapClickHandler({ setNewAsset }) {
   useMapEvents({
     click(e) {
@@ -92,9 +85,19 @@ export default function App() {
         (asset.asset_type || "").toLowerCase().includes(q) ||
         (asset.status || "").toLowerCase().includes(q) ||
         (asset.building || "").toLowerCase().includes(q) ||
-        (asset.room || "").toLowerCase().includes(q),
+        (asset.room || "").toLowerCase().includes(q)
     );
   }, [assets, query]);
+
+  const stats = useMemo(() => {
+    return {
+      total: assets.length,
+      available: assets.filter((a) => a.status === "available").length,
+      inUse: assets.filter((a) => a.status === "in_use").length,
+      maintenance: assets.filter((a) => a.status === "maintenance").length,
+      lost: assets.filter((a) => a.status === "lost").length,
+    };
+  }, [assets]);
 
   const focusAsset = (asset) => {
     setSelectedId(asset.id);
@@ -162,9 +165,7 @@ export default function App() {
   }
 
   async function deleteAsset(assetId) {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to delete this asset?",
-    );
+    const confirmDelete = window.confirm("Are you sure you want to delete this asset?");
     if (!confirmDelete) return;
 
     try {
@@ -176,10 +177,7 @@ export default function App() {
         throw new Error("Failed to delete asset.");
       }
 
-      setAssets((prevAssets) =>
-        prevAssets.filter((asset) => asset.id !== assetId),
-      );
-
+      setAssets((prevAssets) => prevAssets.filter((asset) => asset.id !== assetId));
       alert("Asset deleted successfully");
 
       if (selectedId === assetId) {
@@ -212,13 +210,12 @@ export default function App() {
       }
 
       const updatedAsset = await res.json();
-
       alert("Asset updated successfully");
 
       setAssets((prevAssets) =>
         prevAssets.map((asset) =>
-          asset.id === assetId ? updatedAsset : asset,
-        ),
+          asset.id === assetId ? updatedAsset : asset
+        )
       );
     } catch (err) {
       console.error(err);
@@ -256,7 +253,36 @@ export default function App() {
             color: "white",
           }}
         >
-          <h3 style={{ marginTop: 0 }}>Add New Asset</h3>
+          <h3 style={{ marginTop: 0 }}>Dashboard</h3>
+
+          <div style={statsGridStyle}>
+            <div style={statCardStyle}>
+              <div style={statNumberStyle}>{stats.total}</div>
+              <div style={statLabelStyle}>Total</div>
+            </div>
+            <div style={statCardStyle}>
+              <div style={{ ...statNumberStyle, color: "#2ecc71" }}>{stats.available}</div>
+              <div style={statLabelStyle}>Available</div>
+            </div>
+            <div style={statCardStyle}>
+              <div style={{ ...statNumberStyle, color: "#3498db" }}>{stats.inUse}</div>
+              <div style={statLabelStyle}>In Use</div>
+            </div>
+            <div style={statCardStyle}>
+              <div style={{ ...statNumberStyle, color: "#f39c12" }}>{stats.maintenance}</div>
+              <div style={statLabelStyle}>Maintenance</div>
+            </div>
+            <div style={statCardStyle}>
+              <div style={{ ...statNumberStyle, color: "#e74c3c" }}>{stats.lost}</div>
+              <div style={statLabelStyle}>Lost</div>
+            </div>
+          </div>
+
+          <h3 style={{ marginTop: "20px" }}>Add New Asset</h3>
+
+          <p style={{ fontSize: "13px", opacity: 0.7 }}>
+            Click on the map to auto-fill location
+          </p>
 
           <form onSubmit={addAsset} style={{ marginBottom: "20px" }}>
             <input
@@ -269,6 +295,7 @@ export default function App() {
               style={inputStyle}
               required
             />
+
             <input
               type="text"
               placeholder="Asset type"
@@ -302,6 +329,7 @@ export default function App() {
               }
               style={inputStyle}
             />
+
             <input
               type="text"
               placeholder="Room"
@@ -323,6 +351,7 @@ export default function App() {
               style={inputStyle}
               required
             />
+
             <input
               type="number"
               step="any"
@@ -375,13 +404,26 @@ export default function App() {
             >
               <div style={{ fontWeight: "bold" }}>{asset.name}</div>
               <div style={{ fontSize: "14px", opacity: 0.9 }}>
-                {asset.asset_type} • {asset.status}
+                {asset.asset_type} •{" "}
+                <span
+                  style={{
+                    color:
+                      asset.status === "available"
+                        ? "#2ecc71"
+                        : asset.status === "in_use"
+                        ? "#3498db"
+                        : asset.status === "maintenance"
+                        ? "#f39c12"
+                        : "#e74c3c",
+                  }}
+                >
+                  {asset.status}
+                </span>
               </div>
-              <div
-                style={{ fontSize: "13px", opacity: 0.8, marginBottom: "10px" }}
-              >
+              <div style={{ fontSize: "13px", opacity: 0.8, marginBottom: "10px" }}>
                 {asset.building} {asset.room ? `• ${asset.room}` : ""}
               </div>
+
               <select
                 value={asset.status}
                 onClick={(e) => e.stopPropagation()}
@@ -401,6 +443,7 @@ export default function App() {
                 <option value="maintenance">Maintenance</option>
                 <option value="lost">Lost</option>
               </select>
+
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -429,9 +472,11 @@ export default function App() {
             zoom={15}
             style={{ height: "100%", width: "100%" }}
           >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer
+              attribution="&copy; OpenStreetMap contributors"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
 
-            {/* ✅ THIS FIXES AUTO FILL */}
             <MapClickHandler setNewAsset={setNewAsset} />
 
             {assets.map((asset) => (
@@ -482,4 +527,29 @@ const buttonStyle = {
   color: "white",
   fontWeight: "bold",
   cursor: "pointer",
+};
+
+const statsGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, 1fr)",
+  gap: "10px",
+  marginBottom: "20px",
+};
+
+const statCardStyle = {
+  background: "#1a1a1a",
+  border: "1px solid #444",
+  borderRadius: "10px",
+  padding: "12px",
+  textAlign: "center",
+};
+
+const statNumberStyle = {
+  fontSize: "22px",
+  fontWeight: "bold",
+};
+
+const statLabelStyle = {
+  fontSize: "13px",
+  opacity: 0.8,
 };
