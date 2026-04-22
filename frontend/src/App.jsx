@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -47,11 +53,22 @@ export default function App() {
     longitude: "",
   });
 
+  const [trackingAssetId, setTrackingAssetId] = useState("");
+  const [isTracking, setIsTracking] = useState(false);
+  const [currentPosition, setCurrentPosition] = useState(null);
+
   const mapRef = useRef(null);
   const markerRefs = useRef({});
+  const watchIdRef = useRef(null);
 
   useEffect(() => {
     loadAssets();
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
   }, []);
 
   async function loadAssets() {
@@ -165,23 +182,35 @@ export default function App() {
   }
 
   async function deleteAsset(assetId) {
-    const confirmDelete = window.confirm("Are you sure you want to delete this asset?");
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this asset?"
+    );
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
-        method: "DELETE",
-      });
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/assets/${assetId}/`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (!res.ok) {
         throw new Error("Failed to delete asset.");
       }
 
-      setAssets((prevAssets) => prevAssets.filter((asset) => asset.id !== assetId));
+      setAssets((prevAssets) =>
+        prevAssets.filter((asset) => asset.id !== assetId)
+      );
       alert("Asset deleted successfully");
 
       if (selectedId === assetId) {
         setSelectedId(null);
+      }
+
+      if (String(trackingAssetId) === String(assetId)) {
+        stopLiveTracking();
+        setTrackingAssetId("");
       }
     } catch (err) {
       console.error(err);
@@ -194,16 +223,19 @@ export default function App() {
       const assetToUpdate = assets.find((asset) => asset.id === assetId);
       if (!assetToUpdate) return;
 
-      const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...assetToUpdate,
-          status: newStatus,
-        }),
-      });
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/assets/${assetId}/`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...assetToUpdate,
+            status: newStatus,
+          }),
+        }
+      );
 
       if (!res.ok) {
         throw new Error("Failed to update asset.");
@@ -221,6 +253,111 @@ export default function App() {
       console.error(err);
       alert("Failed to update asset.");
     }
+  }
+
+  async function updateTrackedAssetLocation(assetId, lat, lng) {
+    const assetToUpdate = assets.find(
+      (asset) => String(asset.id) === String(assetId)
+    );
+    if (!assetToUpdate) return;
+
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/assets/${assetId}/`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...assetToUpdate,
+            latitude: lat,
+            longitude: lng,
+          }),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to update tracked asset location.");
+      }
+
+      const updatedAsset = await res.json();
+
+      setAssets((prevAssets) =>
+        prevAssets.map((asset) =>
+          asset.id === updatedAsset.id ? updatedAsset : asset
+        )
+      );
+
+      if (mapRef.current) {
+        mapRef.current.setView([lat, lng], 17);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function startLiveTracking() {
+    if (!trackingAssetId) {
+      alert("Please choose an asset to track first.");
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const lat = Number(position.coords.latitude.toFixed(6));
+        const lng = Number(position.coords.longitude.toFixed(6));
+
+        setCurrentPosition({ lat, lng });
+
+        setNewAsset((prev) => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng,
+        }));
+
+        updateTrackedAssetLocation(trackingAssetId, lat, lng);
+        setIsTracking(true);
+      },
+      (error) => {
+        console.error("Live tracking error:", error);
+
+        if (error.code === 1) {
+          alert("Location permission was denied.");
+        } else if (error.code === 2) {
+          alert("Location unavailable.");
+        } else if (error.code === 3) {
+          alert("Location request timed out.");
+        } else {
+          alert("Unable to retrieve live location.");
+        }
+
+        setIsTracking(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  }
+
+  function stopLiveTracking() {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setIsTracking(false);
   }
 
   return (
@@ -261,24 +398,63 @@ export default function App() {
               <div style={statLabelStyle}>Total</div>
             </div>
             <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#2ecc71" }}>{stats.available}</div>
+              <div style={{ ...statNumberStyle, color: "#2ecc71" }}>
+                {stats.available}
+              </div>
               <div style={statLabelStyle}>Available</div>
             </div>
             <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#3498db" }}>{stats.inUse}</div>
+              <div style={{ ...statNumberStyle, color: "#3498db" }}>
+                {stats.inUse}
+              </div>
               <div style={statLabelStyle}>In Use</div>
             </div>
             <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#f39c12" }}>{stats.maintenance}</div>
+              <div style={{ ...statNumberStyle, color: "#f39c12" }}>
+                {stats.maintenance}
+              </div>
               <div style={statLabelStyle}>Maintenance</div>
             </div>
             <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#e74c3c" }}>{stats.lost}</div>
+              <div style={{ ...statNumberStyle, color: "#e74c3c" }}>
+                {stats.lost}
+              </div>
               <div style={statLabelStyle}>Lost</div>
             </div>
           </div>
 
-          <h3 style={{ marginTop: "20px" }}>Add New Asset</h3>
+          <h3 style={{ marginTop: "20px" }}>Live Tracking</h3>
+
+          <select
+            value={trackingAssetId}
+            onChange={(e) => setTrackingAssetId(e.target.value)}
+            style={inputStyle}
+          >
+            <option value="">Select asset to track</option>
+            {assets.map((asset) => (
+              <option key={asset.id} value={asset.id}>
+                {asset.name}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            onClick={startLiveTracking}
+            style={{ ...buttonStyle, marginBottom: "10px", background: "#2d8cff" }}
+          >
+            {isTracking ? "Tracking..." : "Start Live Tracking"}
+          </button>
+
+          <button
+            type="button"
+            onClick={stopLiveTracking}
+            style={{ ...buttonStyle, marginBottom: "20px", background: "#555" }}
+          >
+            Stop Tracking
+          </button>
+
+          <h3>Add New Asset</h3>
 
           <p style={{ fontSize: "13px", opacity: 0.7 }}>
             Click on the map to auto-fill location
@@ -420,7 +596,9 @@ export default function App() {
                   {asset.status}
                 </span>
               </div>
-              <div style={{ fontSize: "13px", opacity: 0.8, marginBottom: "10px" }}>
+              <div
+                style={{ fontSize: "13px", opacity: 0.8, marginBottom: "10px" }}
+              >
                 {asset.building} {asset.room ? `• ${asset.room}` : ""}
               </div>
 
@@ -471,6 +649,9 @@ export default function App() {
             center={[51.4816, -3.1791]}
             zoom={15}
             style={{ height: "100%", width: "100%" }}
+            whenCreated={(map) => {
+              mapRef.current = map;
+            }}
           >
             <TileLayer
               attribution="&copy; OpenStreetMap contributors"
@@ -478,6 +659,18 @@ export default function App() {
             />
 
             <MapClickHandler setNewAsset={setNewAsset} />
+
+            {currentPosition && (
+              <Marker position={[currentPosition.lat, currentPosition.lng]}>
+                <Popup>
+                  <div>
+                    <strong>Your current location</strong>
+                    <br />
+                    {currentPosition.lat}, {currentPosition.lng}
+                  </div>
+                </Popup>
+              </Marker>
+            )}
 
             {assets.map((asset) => (
               <Marker
