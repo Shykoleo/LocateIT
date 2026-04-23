@@ -19,6 +19,23 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
+function getImageUrl(imagePath) {
+  if (!imagePath) return null;
+
+  if (
+    imagePath.startsWith("http://") ||
+    imagePath.startsWith("https://")
+  ) {
+    return imagePath;
+  }
+
+  if (imagePath.startsWith("/")) {
+    return `http://127.0.0.1:8000${imagePath}`;
+  }
+
+  return `http://127.0.0.1:8000/${imagePath}`;
+}
+
 function MapClickHandler({ setNewAsset }) {
   useMapEvents({
     click(e) {
@@ -37,46 +54,120 @@ function MapClickHandler({ setNewAsset }) {
 }
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [username, setUsername] = useState("");
+  const [loginForm, setLoginForm] = useState({
+    username: "",
+    password: "",
+  });
+
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState("");
+  const [activeSection, setActiveSection] = useState("dashboard");
 
   const [newAsset, setNewAsset] = useState({
     name: "",
+    asset_tag: "",
     asset_type: "",
     status: "available",
+    condition: "good",
+    assigned_to: "",
     building: "",
     room: "",
+    notes: "",
+    image: null,
     latitude: "",
     longitude: "",
   });
 
-  const [trackingAssetId, setTrackingAssetId] = useState("");
-  const [isTracking, setIsTracking] = useState(false);
-  const [currentPosition, setCurrentPosition] = useState(null);
-
   const mapRef = useRef(null);
   const markerRefs = useRef({});
-  const watchIdRef = useRef(null);
 
   useEffect(() => {
-    loadAssets();
-
-    return () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
-    };
+    checkSession();
   }, []);
+
+  async function checkSession() {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/session/", {
+        credentials: "include",
+      });
+
+      const data = await res.json();
+
+      if (data.authenticated) {
+        setIsAuthenticated(true);
+        setUsername(data.username);
+        await loadAssets();
+      } else {
+        setIsAuthenticated(false);
+      }
+    } catch (err) {
+      console.error(err);
+      setIsAuthenticated(false);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/login/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify(loginForm),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        alert(data.message || "Login failed");
+        return;
+      }
+
+      setIsAuthenticated(true);
+      setUsername(data.username);
+      setLoginForm({ username: "", password: "" });
+      await loadAssets();
+    } catch (err) {
+      console.error(err);
+      alert("Login failed");
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch("http://127.0.0.1:8000/api/logout/", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (err) {
+      console.error(err);
+    }
+
+    setIsAuthenticated(false);
+    setUsername("");
+    setAssets([]);
+    setActiveSection("dashboard");
+  }
 
   async function loadAssets() {
     try {
       setLoading(true);
       setErrorMsg("");
 
-      const res = await fetch("http://127.0.0.1:8000/api/assets/");
+      const res = await fetch("http://127.0.0.1:8000/api/assets/", {
+        credentials: "include",
+      });
 
       if (!res.ok) {
         throw new Error(`API error: ${res.status}`);
@@ -99,10 +190,14 @@ export default function App() {
     return assets.filter(
       (asset) =>
         (asset.name || "").toLowerCase().includes(q) ||
+        (asset.asset_tag || "").toLowerCase().includes(q) ||
         (asset.asset_type || "").toLowerCase().includes(q) ||
         (asset.status || "").toLowerCase().includes(q) ||
+        (asset.condition || "").toLowerCase().includes(q) ||
+        (asset.assigned_to || "").toLowerCase().includes(q) ||
         (asset.building || "").toLowerCase().includes(q) ||
-        (asset.room || "").toLowerCase().includes(q)
+        (asset.room || "").toLowerCase().includes(q) ||
+        (asset.notes || "").toLowerCase().includes(q)
     );
   }, [assets, query]);
 
@@ -118,6 +213,7 @@ export default function App() {
 
   const focusAsset = (asset) => {
     setSelectedId(asset.id);
+    setActiveSection("map");
 
     const lat = Number(asset.latitude);
     const lng = Number(asset.longitude);
@@ -128,10 +224,8 @@ export default function App() {
 
     setTimeout(() => {
       const marker = markerRefs.current[asset.id];
-      if (marker) {
-        marker.openPopup();
-      }
-    }, 200);
+      if (marker) marker.openPopup();
+    }, 250);
   };
 
   async function addAsset(e) {
@@ -146,16 +240,27 @@ export default function App() {
     }
 
     try {
+      const formData = new FormData();
+      formData.append("name", newAsset.name);
+      formData.append("asset_tag", newAsset.asset_tag || "");
+      formData.append("asset_type", newAsset.asset_type);
+      formData.append("status", newAsset.status);
+      formData.append("condition", newAsset.condition);
+      formData.append("assigned_to", newAsset.assigned_to || "");
+      formData.append("building", newAsset.building || "");
+      formData.append("room", newAsset.room || "");
+      formData.append("notes", newAsset.notes || "");
+      formData.append("latitude", lat);
+      formData.append("longitude", lng);
+
+      if (newAsset.image) {
+        formData.append("image", newAsset.image);
+      }
+
       const res = await fetch("http://127.0.0.1:8000/api/assets/", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...newAsset,
-          latitude: lat,
-          longitude: lng,
-        }),
+        credentials: "include",
+        body: formData,
       });
 
       if (!res.ok) {
@@ -168,13 +273,20 @@ export default function App() {
 
       setNewAsset({
         name: "",
+        asset_tag: "",
         asset_type: "",
         status: "available",
+        condition: "good",
+        assigned_to: "",
         building: "",
         room: "",
+        notes: "",
+        image: null,
         latitude: "",
         longitude: "",
       });
+
+      alert("Asset added successfully");
     } catch (err) {
       console.error(err);
       alert("Failed to add asset. Please check the form.");
@@ -188,12 +300,10 @@ export default function App() {
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(
-        `http://127.0.0.1:8000/api/assets/${assetId}/`,
-        {
-          method: "DELETE",
-        }
-      );
+      const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
+        method: "DELETE",
+        credentials: "include",
+      });
 
       if (!res.ok) {
         throw new Error("Failed to delete asset.");
@@ -207,11 +317,6 @@ export default function App() {
       if (selectedId === assetId) {
         setSelectedId(null);
       }
-
-      if (String(trackingAssetId) === String(assetId)) {
-        stopLiveTracking();
-        setTrackingAssetId("");
-      }
     } catch (err) {
       console.error(err);
       alert("Failed to delete asset.");
@@ -223,19 +328,17 @@ export default function App() {
       const assetToUpdate = assets.find((asset) => asset.id === assetId);
       if (!assetToUpdate) return;
 
-      const res = await fetch(
-        `http://127.0.0.1:8000/api/assets/${assetId}/`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...assetToUpdate,
-            status: newStatus,
-          }),
-        }
-      );
+      const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          ...assetToUpdate,
+          status: newStatus,
+        }),
+      });
 
       if (!res.ok) {
         throw new Error("Failed to update asset.");
@@ -255,366 +358,217 @@ export default function App() {
     }
   }
 
-  async function updateTrackedAssetLocation(assetId, lat, lng) {
-    const assetToUpdate = assets.find(
-      (asset) => String(asset.id) === String(assetId)
-    );
-    if (!assetToUpdate) return;
+  const renderDashboard = () => (
+    <div>
+      <h2 style={sectionTitleStyle}>Dashboard</h2>
 
-    try {
-      const res = await fetch(
-        `http://127.0.0.1:8000/api/assets/${assetId}/`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...assetToUpdate,
-            latitude: lat,
-            longitude: lng,
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        throw new Error("Failed to update tracked asset location.");
-      }
-
-      const updatedAsset = await res.json();
-
-      setAssets((prevAssets) =>
-        prevAssets.map((asset) =>
-          asset.id === updatedAsset.id ? updatedAsset : asset
-        )
-      );
-
-      if (mapRef.current) {
-        mapRef.current.setView([lat, lng], 17);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  function startLiveTracking() {
-    if (!trackingAssetId) {
-      alert("Please choose an asset to track first.");
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      alert("Geolocation is not supported by your browser.");
-      return;
-    }
-
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        const lat = Number(position.coords.latitude.toFixed(6));
-        const lng = Number(position.coords.longitude.toFixed(6));
-
-        setCurrentPosition({ lat, lng });
-
-        setNewAsset((prev) => ({
-          ...prev,
-          latitude: lat,
-          longitude: lng,
-        }));
-
-        updateTrackedAssetLocation(trackingAssetId, lat, lng);
-        setIsTracking(true);
-      },
-      (error) => {
-        console.error("Live tracking error:", error);
-
-        if (error.code === 1) {
-          alert("Location permission was denied.");
-        } else if (error.code === 2) {
-          alert("Location unavailable.");
-        } else if (error.code === 3) {
-          alert("Location request timed out.");
-        } else {
-          alert("Unable to retrieve live location.");
-        }
-
-        setIsTracking(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      }
-    );
-  }
-
-  function stopLiveTracking() {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    setIsTracking(false);
-  }
-
-  return (
-    <div style={{ height: "100%", width: "100%" }}>
-      <div
-        style={{
-          padding: "12px 16px",
-          fontWeight: "bold",
-          borderBottom: "1px solid #333",
-          background: "#1f1f1f",
-          color: "white",
-        }}
-      >
-        LocateIT — Asset Tracker
+      <div style={statsRowStyle}>
+        <div style={statCardStyle}>
+          <div style={statNumberStyle}>{stats.total}</div>
+          <div style={statLabelStyle}>Total Assets</div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={{ ...statNumberStyle, color: "#2ecc71" }}>
+            {stats.available}
+          </div>
+          <div style={statLabelStyle}>Available</div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={{ ...statNumberStyle, color: "#3498db" }}>
+            {stats.inUse}
+          </div>
+          <div style={statLabelStyle}>In Use</div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={{ ...statNumberStyle, color: "#f39c12" }}>
+            {stats.maintenance}
+          </div>
+          <div style={statLabelStyle}>Maintenance</div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={{ ...statNumberStyle, color: "#e74c3c" }}>
+            {stats.lost}
+          </div>
+          <div style={statLabelStyle}>Lost</div>
+        </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "360px 1fr",
-          height: "calc(100% - 49px)",
-        }}
-      >
-        <div
-          style={{
-            borderRight: "1px solid #333",
-            padding: "12px",
-            overflowY: "auto",
-            background: "#242424",
-            color: "white",
-          }}
-        >
-          <h3 style={{ marginTop: 0 }}>Dashboard</h3>
-
-          <div style={statsGridStyle}>
-            <div style={statCardStyle}>
-              <div style={statNumberStyle}>{stats.total}</div>
-              <div style={statLabelStyle}>Total</div>
-            </div>
-            <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#2ecc71" }}>
-                {stats.available}
-              </div>
-              <div style={statLabelStyle}>Available</div>
-            </div>
-            <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#3498db" }}>
-                {stats.inUse}
-              </div>
-              <div style={statLabelStyle}>In Use</div>
-            </div>
-            <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#f39c12" }}>
-                {stats.maintenance}
-              </div>
-              <div style={statLabelStyle}>Maintenance</div>
-            </div>
-            <div style={statCardStyle}>
-              <div style={{ ...statNumberStyle, color: "#e74c3c" }}>
-                {stats.lost}
-              </div>
-              <div style={statLabelStyle}>Lost</div>
-            </div>
-          </div>
-
-          <h3 style={{ marginTop: "20px" }}>Live Tracking</h3>
-
-          <select
-            value={trackingAssetId}
-            onChange={(e) => setTrackingAssetId(e.target.value)}
-            style={inputStyle}
-          >
-            <option value="">Select asset to track</option>
-            {assets.map((asset) => (
-              <option key={asset.id} value={asset.id}>
-                {asset.name}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={startLiveTracking}
-            style={{ ...buttonStyle, marginBottom: "10px", background: "#2d8cff" }}
-          >
-            {isTracking ? "Tracking..." : "Start Live Tracking"}
-          </button>
-
-          <button
-            type="button"
-            onClick={stopLiveTracking}
-            style={{ ...buttonStyle, marginBottom: "20px", background: "#555" }}
-          >
-            Stop Tracking
-          </button>
-
-          <h3>Add New Asset</h3>
-
-          <p style={{ fontSize: "13px", opacity: 0.7 }}>
-            Click on the map to auto-fill location
-          </p>
-
-          <form onSubmit={addAsset} style={{ marginBottom: "20px" }}>
-            <input
-              type="text"
-              placeholder="Asset name"
-              value={newAsset.name}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, name: e.target.value })
-              }
-              style={inputStyle}
-              required
-            />
-
-            <input
-              type="text"
-              placeholder="Asset type"
-              value={newAsset.asset_type}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, asset_type: e.target.value })
-              }
-              style={inputStyle}
-              required
-            />
-
-            <select
-              value={newAsset.status}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, status: e.target.value })
-              }
-              style={inputStyle}
-            >
-              <option value="available">Available</option>
-              <option value="in_use">In Use</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="lost">Lost</option>
-            </select>
-
-            <input
-              type="text"
-              placeholder="Building"
-              value={newAsset.building}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, building: e.target.value })
-              }
-              style={inputStyle}
-            />
-
-            <input
-              type="text"
-              placeholder="Room"
-              value={newAsset.room}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, room: e.target.value })
-              }
-              style={inputStyle}
-            />
-
-            <input
-              type="number"
-              step="any"
-              placeholder="Latitude"
-              value={newAsset.latitude || ""}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, latitude: e.target.value })
-              }
-              style={inputStyle}
-              required
-            />
-
-            <input
-              type="number"
-              step="any"
-              placeholder="Longitude"
-              value={newAsset.longitude || ""}
-              onChange={(e) =>
-                setNewAsset({ ...newAsset, longitude: e.target.value })
-              }
-              style={inputStyle}
-              required
-            />
-
-            <button type="submit" style={buttonStyle}>
-              Add Asset
-            </button>
-          </form>
-
-          <h3>Assets</h3>
-
-          <input
-            type="text"
-            placeholder="Search assets..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={inputStyle}
-          />
-
-          {loading && <p>Loading assets...</p>}
-          {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
-
-          {!loading && !errorMsg && filteredAssets.length === 0 && (
-            <p>No assets found.</p>
-          )}
-
-          {filteredAssets.map((asset) => (
+      <div style={dashboardPanelsStyle}>
+        <div style={panelStyle}>
+          <h3 style={panelTitleStyle}>Recent Assets</h3>
+          {filteredAssets.slice(0, 5).map((asset) => (
             <div
               key={asset.id}
+              style={miniAssetRowStyle}
               onClick={() => focusAsset(asset)}
-              style={{
-                padding: "12px",
-                marginBottom: "10px",
-                borderRadius: "10px",
-                background: selectedId === asset.id ? "#353f6b" : "#2c2c2c",
-                border:
-                  selectedId === asset.id
-                    ? "1px solid #6c7bff"
-                    : "1px solid #444",
-                cursor: "pointer",
-              }}
             >
-              <div style={{ fontWeight: "bold" }}>{asset.name}</div>
-              <div style={{ fontSize: "14px", opacity: 0.9 }}>
-                {asset.asset_type} •{" "}
-                <span
-                  style={{
-                    color:
-                      asset.status === "available"
-                        ? "#2ecc71"
-                        : asset.status === "in_use"
-                        ? "#3498db"
-                        : asset.status === "maintenance"
-                        ? "#f39c12"
-                        : "#e74c3c",
-                  }}
-                >
-                  {asset.status}
-                </span>
+              <div>
+                <div style={{ fontWeight: "bold" }}>{asset.name}</div>
+                <div style={{ fontSize: "13px", opacity: 0.8 }}>
+                  {asset.asset_tag ? `${asset.asset_tag} • ` : ""}
+                  {asset.asset_type} • {asset.building}
+                </div>
               </div>
               <div
-                style={{ fontSize: "13px", opacity: 0.8, marginBottom: "10px" }}
+                style={{
+                  fontSize: "12px",
+                  color:
+                    asset.status === "available"
+                      ? "#2ecc71"
+                      : asset.status === "in_use"
+                      ? "#3498db"
+                      : asset.status === "maintenance"
+                      ? "#f39c12"
+                      : "#e74c3c",
+                }}
               >
-                {asset.building} {asset.room ? `• ${asset.room}` : ""}
+                {asset.status}
               </div>
+            </div>
+          ))}
+        </div>
 
+        <div style={panelStyle}>
+          <h3 style={panelTitleStyle}>Quick Actions</h3>
+          <button
+            style={actionButtonStyle}
+            onClick={() => setActiveSection("add")}
+          >
+            Add New Asset
+          </button>
+          <button
+            style={actionButtonStyle}
+            onClick={() => setActiveSection("assets")}
+          >
+            Manage Assets
+          </button>
+          <button
+            style={actionButtonStyle}
+            onClick={() => setActiveSection("map")}
+          >
+            Open Map View
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAssets = () => (
+    <div>
+      <h2 style={sectionTitleStyle}>Assets</h2>
+
+      <input
+        type="text"
+        placeholder="Search by name, tag, type, status, assignee..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        style={{ ...inputStyle, maxWidth: "520px", marginBottom: "18px" }}
+      />
+
+      {loading && <p>Loading assets...</p>}
+      {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
+
+      <div style={{ display: "grid", gap: "12px" }}>
+        {filteredAssets.map((asset) => (
+          <div key={asset.id} style={assetManagementCardStyle}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: asset.image ? "180px 1fr" : "1fr",
+                gap: "16px",
+                alignItems: "start",
+              }}
+            >
+              {asset.image && (
+                <div
+                  style={{
+                    width: "180px",
+                    height: "180px",
+                    overflow: "hidden",
+                    borderRadius: "10px",
+                    border: "1px solid #242424",
+                    background: "#111",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <img
+                    src={getImageUrl(asset.image)}
+                    alt={asset.name}
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                    }}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                </div>
+              )}
+
+              <div onClick={() => focusAsset(asset)} style={{ cursor: "pointer" }}>
+                <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                  {asset.name}
+                </div>
+
+                <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
+                  {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "Tag: Not set"}
+                </div>
+
+                <div style={{ marginTop: "4px", opacity: 0.9 }}>
+                  {asset.asset_type} •{" "}
+                  <span
+                    style={{
+                      color:
+                        asset.status === "available"
+                          ? "#2ecc71"
+                          : asset.status === "in_use"
+                          ? "#3498db"
+                          : asset.status === "maintenance"
+                          ? "#f39c12"
+                          : "#e74c3c",
+                    }}
+                  >
+                    {asset.status}
+                  </span>
+                </div>
+
+                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                  Condition: {asset.condition || "N/A"}
+                </div>
+
+                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                  Assigned to: {asset.assigned_to || "Unassigned"}
+                </div>
+
+                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                  {asset.building} {asset.room ? `• ${asset.room}` : ""}
+                </div>
+
+                {asset.notes && (
+                  <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.75 }}>
+                    Notes: {asset.notes}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                marginTop: "14px",
+                flexWrap: "wrap",
+              }}
+            >
               <select
                 value={asset.status}
-                onClick={(e) => e.stopPropagation()}
                 onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  marginBottom: "8px",
-                  borderRadius: "6px",
-                  border: "1px solid #555",
-                  background: "#1a1a1a",
-                  color: "white",
-                }}
+                style={{ ...inputStyle, marginBottom: 0, flex: "1 1 180px" }}
               >
                 <option value="available">Available</option>
                 <option value="in_use">In Use</option>
@@ -623,28 +577,166 @@ export default function App() {
               </select>
 
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteAsset(asset.id);
-                }}
-                style={{
-                  width: "100%",
-                  padding: "8px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "#c0392b",
-                  color: "white",
-                  fontWeight: "bold",
-                  cursor: "pointer",
-                }}
+                onClick={() => deleteAsset(asset.id)}
+                style={{ ...dangerButtonStyle, flex: "1 1 140px" }}
               >
                 Delete
               </button>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
-        <div style={{ height: "100%" }}>
+  const renderAddAsset = () => (
+    <div>
+      <h2 style={sectionTitleStyle}>Add New Asset</h2>
+      <p style={{ fontSize: "14px", opacity: 0.75, marginBottom: "16px" }}>
+        Click on the map to auto-fill the asset location.
+      </p>
+
+      <div style={formMapLayoutStyle}>
+        <form onSubmit={addAsset} style={panelStyle}>
+          <input
+            type="text"
+            placeholder="Asset name"
+            value={newAsset.name}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, name: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <input
+            type="text"
+            placeholder="Asset tag (e.g. LAP-001)"
+            value={newAsset.asset_tag}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, asset_tag: e.target.value })
+            }
+            style={inputStyle}
+          />
+
+          <input
+            type="text"
+            placeholder="Asset type"
+            value={newAsset.asset_type}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, asset_type: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <select
+            value={newAsset.status}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, status: e.target.value })
+            }
+            style={inputStyle}
+          >
+            <option value="available">Available</option>
+            <option value="in_use">In Use</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="lost">Lost</option>
+          </select>
+
+          <select
+            value={newAsset.condition}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, condition: e.target.value })
+            }
+            style={inputStyle}
+          >
+            <option value="excellent">Excellent</option>
+            <option value="good">Good</option>
+            <option value="fair">Fair</option>
+            <option value="poor">Poor</option>
+          </select>
+
+          <input
+            type="text"
+            placeholder="Assigned to"
+            value={newAsset.assigned_to}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, assigned_to: e.target.value })
+            }
+            style={inputStyle}
+          />
+
+          <input
+            type="text"
+            placeholder="Building"
+            value={newAsset.building}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, building: e.target.value })
+            }
+            style={inputStyle}
+          />
+
+          <input
+            type="text"
+            placeholder="Room"
+            value={newAsset.room}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, room: e.target.value })
+            }
+            style={inputStyle}
+          />
+
+          <textarea
+            placeholder="Notes"
+            value={newAsset.notes}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, notes: e.target.value })
+            }
+            style={textareaStyle}
+            rows={4}
+          />
+
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, image: e.target.files[0] || null })
+            }
+            style={inputStyle}
+          />
+
+          <input
+            type="number"
+            step="any"
+            placeholder="Latitude"
+            value={newAsset.latitude || ""}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, latitude: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <input
+            type="number"
+            step="any"
+            placeholder="Longitude"
+            value={newAsset.longitude || ""}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, longitude: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <button type="submit" style={buttonStyle}>
+            Add Asset
+          </button>
+        </form>
+
+        <div
+          style={{ ...panelStyle, height: "500px", padding: 0, overflow: "hidden" }}
+        >
           <MapContainer
             center={[51.4816, -3.1791]}
             zoom={15}
@@ -657,20 +749,7 @@ export default function App() {
               attribution="&copy; OpenStreetMap contributors"
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-
             <MapClickHandler setNewAsset={setNewAsset} />
-
-            {currentPosition && (
-              <Marker position={[currentPosition.lat, currentPosition.lng]}>
-                <Popup>
-                  <div>
-                    <strong>Your current location</strong>
-                    <br />
-                    {currentPosition.lat}, {currentPosition.lng}
-                  </div>
-                </Popup>
-              </Marker>
-            )}
 
             {assets.map((asset) => (
               <Marker
@@ -682,13 +761,51 @@ export default function App() {
               >
                 <Popup>
                   <div>
+                    {asset.image && (
+                      <div
+                        style={{
+                          width: "220px",
+                          height: "120px",
+                          overflow: "hidden",
+                          borderRadius: "8px",
+                          marginBottom: "8px",
+                          background: "#111",
+                        }}
+                      >
+                        <img
+                          src={getImageUrl(asset.image)}
+                          alt={asset.name}
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                          }}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                        />
+                      </div>
+                    )}
                     <strong>{asset.name}</strong>
+                    <br />
+                    {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "No tag"}
                     <br />
                     Type: {asset.asset_type}
                     <br />
                     Status: {asset.status}
                     <br />
+                    Condition: {asset.condition || "N/A"}
+                    <br />
+                    Assigned to: {asset.assigned_to || "Unassigned"}
+                    <br />
                     {asset.building} {asset.room ? `• ${asset.room}` : ""}
+                    {asset.notes ? (
+                      <>
+                        <br />
+                        Notes: {asset.notes}
+                      </>
+                    ) : null}
                   </div>
                 </Popup>
               </Marker>
@@ -698,51 +815,418 @@ export default function App() {
       </div>
     </div>
   );
+
+  const renderMap = () => (
+    <div>
+      <h2 style={sectionTitleStyle}>Map View</h2>
+      <div
+        style={{ ...panelStyle, height: "620px", padding: 0, overflow: "hidden" }}
+      >
+        <MapContainer
+          center={[51.4816, -3.1791]}
+          zoom={15}
+          style={{ height: "100%", width: "100%" }}
+          whenCreated={(map) => {
+            mapRef.current = map;
+          }}
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          {assets.map((asset) => (
+            <Marker
+              key={asset.id}
+              position={[Number(asset.latitude), Number(asset.longitude)]}
+              ref={(ref) => {
+                if (ref) markerRefs.current[asset.id] = ref;
+              }}
+            >
+              <Popup>
+                <div>
+                  {asset.image && (
+                    <div
+                      style={{
+                        width: "220px",
+                        height: "120px",
+                        overflow: "hidden",
+                        borderRadius: "8px",
+                        marginBottom: "8px",
+                        background: "#111",
+                      }}
+                    >
+                      <img
+                        src={getImageUrl(asset.image)}
+                        alt={asset.name}
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                        }}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
+                    </div>
+                  )}
+                  <strong>{asset.name}</strong>
+                  <br />
+                  {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "No tag"}
+                  <br />
+                  Type: {asset.asset_type}
+                  <br />
+                  Status: {asset.status}
+                  <br />
+                  Condition: {asset.condition || "N/A"}
+                  <br />
+                  Assigned to: {asset.assigned_to || "Unassigned"}
+                  <br />
+                  {asset.building} {asset.room ? `• ${asset.room}` : ""}
+                  {asset.notes ? (
+                    <>
+                      <br />
+                      Notes: {asset.notes}
+                    </>
+                  ) : null}
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      </div>
+    </div>
+  );
+
+  if (authLoading) {
+    return (
+      <div style={loginPageStyle}>
+        <div style={loginCardStyle}>Loading...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div style={loginPageStyle}>
+        <form onSubmit={handleLogin} style={loginCardStyle}>
+          <h1 style={{ marginTop: 0 }}>LocateIT Staff Login</h1>
+
+          <input
+            type="text"
+            placeholder="Username"
+            value={loginForm.username}
+            onChange={(e) =>
+              setLoginForm({ ...loginForm, username: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <input
+            type="password"
+            placeholder="Password"
+            value={loginForm.password}
+            onChange={(e) =>
+              setLoginForm({ ...loginForm, password: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <button type="submit" style={buttonStyle}>
+            Login
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div style={appShellStyle}>
+      <aside style={sidebarStyle}>
+        <div style={brandStyle}>LOCATEIT</div>
+
+        <button
+          style={navButtonStyle(activeSection === "dashboard")}
+          onClick={() => setActiveSection("dashboard")}
+        >
+          Dashboard
+        </button>
+        <button
+          style={navButtonStyle(activeSection === "assets")}
+          onClick={() => setActiveSection("assets")}
+        >
+          Assets
+        </button>
+        <button
+          style={navButtonStyle(activeSection === "map")}
+          onClick={() => setActiveSection("map")}
+        >
+          Map View
+        </button>
+        <button
+          style={navButtonStyle(activeSection === "add")}
+          onClick={() => setActiveSection("add")}
+        >
+          Add Asset
+        </button>
+      </aside>
+
+      <div style={mainAreaStyle}>
+        <header style={topbarStyle}>
+          <div style={{ fontWeight: "bold", letterSpacing: "0.5px" }}>
+            Asset Monitoring and Management Dashboard
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ opacity: 0.85 }}>Logged in as {username}</span>
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: "8px 14px",
+                borderRadius: "8px",
+                border: "1px solid #7f1d1d",
+                background: "#181818",
+                color: "white",
+                cursor: "pointer",
+              }}
+            >
+              Logout
+            </button>
+          </div>
+        </header>
+
+        <main style={contentStyle}>
+          {activeSection === "dashboard" && renderDashboard()}
+          {activeSection === "assets" && renderAssets()}
+          {activeSection === "map" && renderMap()}
+          {activeSection === "add" && renderAddAsset()}
+        </main>
+      </div>
+    </div>
+  );
 }
+
+const appShellStyle = {
+  display: "grid",
+  gridTemplateColumns: "240px 1fr",
+  height: "100vh",
+  background: "#050505",
+  color: "white",
+};
+
+const sidebarStyle = {
+  background: "#0b0b0b",
+  borderRight: "1px solid #1f1f1f",
+  padding: "20px 14px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "12px",
+};
+
+const brandStyle = {
+  fontSize: "32px",
+  fontWeight: "bold",
+  marginBottom: "20px",
+  color: "#ffffff",
+  fontFamily: "Calibri, sans-serif",
+};
+
+const navButtonStyle = (active) => ({
+  padding: "14px 16px",
+  borderRadius: "10px",
+  border: active ? "1px solid #b71c1c" : "1px solid transparent",
+  background: active ? "#1a1a1a" : "transparent",
+  color: active ? "#ffffff" : "#d0d0d0",
+  textAlign: "left",
+  cursor: "pointer",
+  fontSize: "15px",
+  transition: "0.2s ease",
+  boxShadow: active ? "0 0 10px rgba(183,28,28,0.4)" : "none",
+});
+
+const mainAreaStyle = {
+  display: "grid",
+  gridTemplateRows: "70px 1fr",
+  minWidth: 0,
+  background: "#050505",
+};
+
+const topbarStyle = {
+  borderBottom: "1px solid #1f1f1f",
+  background: "#0d0d0d",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "0 24px",
+  color: "#ffffff",
+};
+
+const contentStyle = {
+  padding: "24px",
+  overflowY: "auto",
+  background: "#050505",
+};
+
+const sectionTitleStyle = {
+  fontSize: "36px",
+  marginTop: 0,
+  marginBottom: "20px",
+  fontWeight: "bold",
+  fontFamily: "Calibri, sans-serif",
+};
+
+const statsRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "16px",
+  marginBottom: "24px",
+};
+
+const statCardStyle = {
+  background: "#101010",
+  border: "1px solid #1f1f1f",
+  borderRadius: "14px",
+  padding: "18px",
+  textAlign: "center",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
+};
+
+const statNumberStyle = {
+  fontSize: "28px",
+  fontWeight: "bold",
+  color: "#ffffff",
+  fontFamily: "Calibri, sans-serif",
+};
+
+const statLabelStyle = {
+  fontSize: "14px",
+  opacity: 0.82,
+  marginTop: "4px",
+  color: "#d0d0d0",
+};
+
+const dashboardPanelsStyle = {
+  display: "grid",
+  gridTemplateColumns: "2fr 1fr",
+  gap: "20px",
+};
+
+const panelStyle = {
+  background: "#101010",
+  border: "1px solid #1f1f1f",
+  borderRadius: "14px",
+  padding: "20px",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
+};
+
+const panelTitleStyle = {
+  marginTop: 0,
+  marginBottom: "16px",
+  fontSize: "22px",
+  fontWeight: "bold",
+  fontFamily: "Calibri, sans-serif",
+};
+
+const miniAssetRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  padding: "12px 0",
+  borderBottom: "1px solid #1f1f1f",
+  cursor: "pointer",
+};
+
+const assetManagementCardStyle = {
+  background: "#101010",
+  border: "1px solid #1f1f1f",
+  borderRadius: "12px",
+  padding: "16px",
+  overflow: "hidden",
+};
+
+const formMapLayoutStyle = {
+  display: "grid",
+  gridTemplateColumns: "380px 1fr",
+  gap: "20px",
+};
 
 const inputStyle = {
   width: "100%",
-  padding: "10px",
-  marginBottom: "10px",
+  padding: "12px",
+  marginBottom: "12px",
   borderRadius: "8px",
-  border: "1px solid #555",
-  background: "#1a1a1a",
+  border: "1px solid #242424",
+  background: "#080808",
   color: "white",
   boxSizing: "border-box",
+  fontFamily: "Calibri, sans-serif",
+};
+
+const textareaStyle = {
+  width: "100%",
+  padding: "12px",
+  marginBottom: "12px",
+  borderRadius: "8px",
+  border: "1px solid #242424",
+  background: "#080808",
+  color: "white",
+  boxSizing: "border-box",
+  fontFamily: "Calibri, sans-serif",
+  resize: "vertical",
 };
 
 const buttonStyle = {
   width: "100%",
-  padding: "10px",
+  padding: "12px",
   borderRadius: "8px",
-  border: "none",
-  background: "#646cff",
+  border: "1px solid #7f1d1d",
+  background: "linear-gradient(180deg, #b71c1c 0%, #7f1d1d 100%)",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+  fontFamily: "Calibri, sans-serif",
+};
+
+const actionButtonStyle = {
+  width: "100%",
+  padding: "12px",
+  borderRadius: "8px",
+  border: "1px solid #2a2a2a",
+  background: "#181818",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+  marginBottom: "10px",
+};
+
+const dangerButtonStyle = {
+  width: "100%",
+  padding: "12px",
+  borderRadius: "8px",
+  border: "1px solid #5c0f0f",
+  background: "linear-gradient(180deg, #c62828 0%, #7f1d1d 100%)",
   color: "white",
   fontWeight: "bold",
   cursor: "pointer",
 };
 
-const statsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, 1fr)",
-  gap: "10px",
-  marginBottom: "20px",
+const loginPageStyle = {
+  height: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#050505",
 };
 
-const statCardStyle = {
-  background: "#1a1a1a",
-  border: "1px solid #444",
-  borderRadius: "10px",
-  padding: "12px",
-  textAlign: "center",
-};
-
-const statNumberStyle = {
-  fontSize: "22px",
-  fontWeight: "bold",
-};
-
-const statLabelStyle = {
-  fontSize: "13px",
-  opacity: 0.8,
+const loginCardStyle = {
+  width: "100%",
+  maxWidth: "420px",
+  background: "#101010",
+  border: "1px solid #1f1f1f",
+  borderRadius: "14px",
+  padding: "28px",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
 };
