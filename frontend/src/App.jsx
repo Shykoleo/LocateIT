@@ -69,6 +69,10 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [activeSection, setActiveSection] = useState("dashboard");
 
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [buildingFilter, setBuildingFilter] = useState("all");
+
   const [newAsset, setNewAsset] = useState({
     name: "",
     asset_tag: "",
@@ -183,12 +187,22 @@ export default function App() {
     }
   }
 
+  const assetTypes = useMemo(() => {
+    const unique = [...new Set(assets.map((asset) => asset.asset_type).filter(Boolean))];
+    return unique.sort();
+  }, [assets]);
+
+  const buildings = useMemo(() => {
+    const unique = [...new Set(assets.map((asset) => asset.building).filter(Boolean))];
+    return unique.sort();
+  }, [assets]);
+
   const filteredAssets = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return assets;
 
-    return assets.filter(
-      (asset) =>
+    return assets.filter((asset) => {
+      const matchesSearch =
+        !q ||
         (asset.name || "").toLowerCase().includes(q) ||
         (asset.asset_tag || "").toLowerCase().includes(q) ||
         (asset.asset_type || "").toLowerCase().includes(q) ||
@@ -197,9 +211,20 @@ export default function App() {
         (asset.assigned_to || "").toLowerCase().includes(q) ||
         (asset.building || "").toLowerCase().includes(q) ||
         (asset.room || "").toLowerCase().includes(q) ||
-        (asset.notes || "").toLowerCase().includes(q)
-    );
-  }, [assets, query]);
+        (asset.notes || "").toLowerCase().includes(q);
+
+      const matchesStatus =
+        statusFilter === "all" || asset.status === statusFilter;
+
+      const matchesType =
+        typeFilter === "all" || asset.asset_type === typeFilter;
+
+      const matchesBuilding =
+        buildingFilter === "all" || asset.building === buildingFilter;
+
+      return matchesSearch && matchesStatus && matchesType && matchesBuilding;
+    });
+  }, [assets, query, statusFilter, typeFilter, buildingFilter]);
 
   const stats = useMemo(() => {
     return {
@@ -210,6 +235,10 @@ export default function App() {
       lost: assets.filter((a) => a.status === "lost").length,
     };
   }, [assets]);
+
+  const selectedAsset = useMemo(() => {
+  return assets.find((asset) => asset.id === selectedId) || null;
+}, [assets, selectedId]);
 
   const focusAsset = (asset) => {
     setSelectedId(asset.id);
@@ -358,6 +387,13 @@ export default function App() {
     }
   }
 
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setBuildingFilter("all");
+  }
+
   const renderDashboard = () => (
     <div>
       <h2 style={sectionTitleStyle}>Dashboard</h2>
@@ -454,140 +490,220 @@ export default function App() {
   );
 
   const renderAssets = () => (
-    <div>
-      <h2 style={sectionTitleStyle}>Assets</h2>
+  <div>
+    <h2 style={sectionTitleStyle}>Assets</h2>
 
+    {selectedAsset && (
+      <div style={detailsPanelStyle}>
+        <h3 style={panelTitleStyle}>Selected Asset Details</h3>
+
+        <div style={detailsContentStyle}>
+          {selectedAsset.image && (
+            <div style={detailsImageBoxStyle}>
+              <img
+                src={getImageUrl(selectedAsset.image)}
+                alt={selectedAsset.name}
+                style={detailsImageStyle}
+              />
+            </div>
+          )}
+
+          <div>
+            <h3 style={{ marginTop: 0 }}>{selectedAsset.name}</h3>
+            <p><strong>Tag:</strong> {selectedAsset.asset_tag || "Not set"}</p>
+            <p><strong>Type:</strong> {selectedAsset.asset_type}</p>
+            <p><strong>Status:</strong> {selectedAsset.status}</p>
+            <p><strong>Condition:</strong> {selectedAsset.condition || "N/A"}</p>
+            <p><strong>Assigned to:</strong> {selectedAsset.assigned_to || "Unassigned"}</p>
+            <p><strong>Location:</strong> {selectedAsset.building} {selectedAsset.room ? `• ${selectedAsset.room}` : ""}</p>
+            <p><strong>Coordinates:</strong> {selectedAsset.latitude}, {selectedAsset.longitude}</p>
+            <p><strong>Notes:</strong> {selectedAsset.notes || "No notes added"}</p>
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <button
+                style={buttonStyle}
+                onClick={() => focusAsset(selectedAsset)}
+              >
+                View on Map
+              </button>
+
+              <button
+                style={secondaryButtonStyle}
+                onClick={() => setSelectedId(null)}
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <div style={filtersPanelStyle}>
       <input
         type="text"
         placeholder="Search by name, tag, type, status, assignee..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        style={{ ...inputStyle, maxWidth: "520px", marginBottom: "18px" }}
+        style={{ ...inputStyle, marginBottom: 0 }}
       />
 
-      {loading && <p>Loading assets...</p>}
-      {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
+      <div style={filtersGridStyle}>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+          <option value="all">All Statuses</option>
+          <option value="available">Available</option>
+          <option value="in_use">In Use</option>
+          <option value="maintenance">Maintenance</option>
+          <option value="lost">Lost</option>
+        </select>
 
-      <div style={{ display: "grid", gap: "12px" }}>
-        {filteredAssets.map((asset) => (
-          <div key={asset.id} style={assetManagementCardStyle}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: asset.image ? "180px 1fr" : "1fr",
-                gap: "16px",
-                alignItems: "start",
-              }}
-            >
-              {asset.image && (
-                <div
-                  style={{
-                    width: "180px",
-                    height: "180px",
-                    overflow: "hidden",
-                    borderRadius: "10px",
-                    border: "1px solid #242424",
-                    background: "#111",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  <img
-                    src={getImageUrl(asset.image)}
-                    alt={asset.name}
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      display: "block",
-                    }}
-                  />
-                </div>
-              )}
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+          <option value="all">All Types</option>
+          {assetTypes.map((type) => (
+            <option key={type} value={type}>{type}</option>
+          ))}
+        </select>
 
-              <div onClick={() => focusAsset(asset)} style={{ cursor: "pointer" }}>
-                <div style={{ fontWeight: "bold", fontSize: "18px" }}>
-                  {asset.name}
-                </div>
+        <select value={buildingFilter} onChange={(e) => setBuildingFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
+          <option value="all">All Buildings</option>
+          {buildings.map((building) => (
+            <option key={building} value={building}>{building}</option>
+          ))}
+        </select>
 
-                <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
-                  {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "Tag: Not set"}
-                </div>
+        <button onClick={clearFilters} style={secondaryButtonStyle}>
+          Clear Filters
+        </button>
+      </div>
 
-                <div style={{ marginTop: "4px", opacity: 0.9 }}>
-                  {asset.asset_type} •{" "}
-                  <span
-                    style={{
-                      color:
-                        asset.status === "available"
-                          ? "#2ecc71"
-                          : asset.status === "in_use"
-                          ? "#3498db"
-                          : asset.status === "maintenance"
-                          ? "#f39c12"
-                          : "#e74c3c",
-                    }}
-                  >
-                    {asset.status}
-                  </span>
-                </div>
-
-                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
-                  Condition: {asset.condition || "N/A"}
-                </div>
-
-                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
-                  Assigned to: {asset.assigned_to || "Unassigned"}
-                </div>
-
-                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
-                  {asset.building} {asset.room ? `• ${asset.room}` : ""}
-                </div>
-
-                {asset.notes && (
-                  <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.75 }}>
-                    Notes: {asset.notes}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                marginTop: "14px",
-                flexWrap: "wrap",
-              }}
-            >
-              <select
-                value={asset.status}
-                onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
-                style={{ ...inputStyle, marginBottom: 0, flex: "1 1 180px" }}
-              >
-                <option value="available">Available</option>
-                <option value="in_use">In Use</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="lost">Lost</option>
-              </select>
-
-              <button
-                onClick={() => deleteAsset(asset.id)}
-                style={{ ...dangerButtonStyle, flex: "1 1 140px" }}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        ))}
+      <div style={{ fontSize: "13px", opacity: 0.75 }}>
+        Showing {filteredAssets.length} of {assets.length} assets
       </div>
     </div>
-  );
+
+    {loading && <p>Loading assets...</p>}
+    {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
+
+    <div style={{ display: "grid", gap: "12px" }}>
+      {filteredAssets.map((asset) => (
+        <div key={asset.id} style={assetManagementCardStyle}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: asset.image ? "180px 1fr" : "1fr",
+              gap: "16px",
+              alignItems: "start",
+            }}
+          >
+            {asset.image && (
+              <div
+                style={{
+                  width: "180px",
+                  height: "180px",
+                  overflow: "hidden",
+                  borderRadius: "10px",
+                  border: "1px solid #242424",
+                  background: "#111",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <img
+                  src={getImageUrl(asset.image)}
+                  alt={asset.name}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+              </div>
+            )}
+
+            <div
+              onClick={() => setSelectedId(asset.id)}
+              style={{ cursor: "pointer" }}
+            >
+              <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                {asset.name}
+              </div>
+
+              <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
+                {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "Tag: Not set"}
+              </div>
+
+              <div style={{ marginTop: "4px", opacity: 0.9 }}>
+                {asset.asset_type} •{" "}
+                <span
+                  style={{
+                    color:
+                      asset.status === "available"
+                        ? "#2ecc71"
+                        : asset.status === "in_use"
+                        ? "#3498db"
+                        : asset.status === "maintenance"
+                        ? "#f39c12"
+                        : "#e74c3c",
+                  }}
+                >
+                  {asset.status}
+                </span>
+              </div>
+
+              <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                Condition: {asset.condition || "N/A"}
+              </div>
+
+              <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                Assigned to: {asset.assigned_to || "Unassigned"}
+              </div>
+
+              <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                {asset.building} {asset.room ? `• ${asset.room}` : ""}
+              </div>
+
+              {asset.notes && (
+                <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.75 }}>
+                  Notes: {asset.notes}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              marginTop: "14px",
+              flexWrap: "wrap",
+            }}
+          >
+            <select
+              value={asset.status}
+              onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
+              style={{ ...inputStyle, marginBottom: 0, flex: "1 1 180px" }}
+            >
+              <option value="available">Available</option>
+              <option value="in_use">In Use</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="lost">Lost</option>
+            </select>
+
+            <button
+              onClick={() => deleteAsset(asset.id)}
+              style={{ ...dangerButtonStyle, flex: "1 1 140px" }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
   const renderAddAsset = () => (
     <div>
@@ -1122,6 +1238,22 @@ const panelStyle = {
   boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
 };
 
+const filtersPanelStyle = {
+  background: "#101010",
+  border: "1px solid #1f1f1f",
+  borderRadius: "12px",
+  padding: "16px",
+  marginBottom: "18px",
+  display: "grid",
+  gap: "12px",
+};
+
+const filtersGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(160px, 1fr))",
+  gap: "12px",
+};
+
 const panelTitleStyle = {
   marginTop: 0,
   marginBottom: "16px",
@@ -1190,6 +1322,18 @@ const buttonStyle = {
   fontFamily: "Calibri, sans-serif",
 };
 
+const secondaryButtonStyle = {
+  width: "100%",
+  padding: "12px",
+  borderRadius: "8px",
+  border: "1px solid #2a2a2a",
+  background: "#181818",
+  color: "white",
+  fontWeight: "bold",
+  cursor: "pointer",
+  fontFamily: "Calibri, sans-serif",
+};
+
 const actionButtonStyle = {
   width: "100%",
   padding: "12px",
@@ -1229,4 +1373,35 @@ const loginCardStyle = {
   borderRadius: "14px",
   padding: "28px",
   boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
+};
+
+const detailsPanelStyle = {
+  background: "#101010",
+  border: "1px solid #1f1f1f",
+  borderRadius: "12px",
+  padding: "18px",
+  marginBottom: "18px",
+};
+
+const detailsContentStyle = {
+  display: "grid",
+  gridTemplateColumns: "220px 1fr",
+  gap: "18px",
+  alignItems: "start",
+};
+
+const detailsImageBoxStyle = {
+  width: "220px",
+  height: "220px",
+  overflow: "hidden",
+  borderRadius: "12px",
+  border: "1px solid #242424",
+  background: "#111",
+};
+
+const detailsImageStyle = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  display: "block",
 };
