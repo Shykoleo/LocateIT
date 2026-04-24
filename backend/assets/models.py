@@ -28,6 +28,14 @@ class Asset(models.Model):
     latitude = models.FloatField()
     longitude = models.FloatField()
     created_at = models.DateTimeField(auto_now_add=True)
+    last_checked = models.DateField(blank=True, null=True)
+    next_maintenance_date = models.DateField(blank=True, null=True)
+    image = models.ImageField(upload_to="asset_images/", blank=True, null=True)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_checked = models.DateField(blank=True, null=True)
+    next_maintenance_date = models.DateField(blank=True, null=True)
 
     def __str__(self):
         return self.name

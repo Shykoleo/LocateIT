@@ -21,7 +21,8 @@ L.Icon.Default.mergeOptions({
 
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
-  if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) return imagePath;
+  if (imagePath.startsWith("http://") || imagePath.startsWith("https://"))
+    return imagePath;
   if (imagePath.startsWith("/")) return `http://127.0.0.1:8000${imagePath}`;
   return `http://127.0.0.1:8000/${imagePath}`;
 }
@@ -72,12 +73,17 @@ export default function App() {
     room: "",
     notes: "",
     image: null,
+    last_checked: "",
+    next_maintenance_date: "",
     latitude: "",
     longitude: "",
   });
 
+  const [editingAsset, setEditingAsset] = useState(null);
+
   const mapRef = useRef(null);
   const markerRefs = useRef({});
+  const mainContentRef = useRef(null);
 
   useEffect(() => {
     checkSession();
@@ -208,11 +214,15 @@ export default function App() {
   }
 
   const assetTypes = useMemo(() => {
-    return [...new Set(assets.map((asset) => asset.asset_type).filter(Boolean))].sort();
+    return [
+      ...new Set(assets.map((asset) => asset.asset_type).filter(Boolean)),
+    ].sort();
   }, [assets]);
 
   const buildings = useMemo(() => {
-    return [...new Set(assets.map((asset) => asset.building).filter(Boolean))].sort();
+    return [
+      ...new Set(assets.map((asset) => asset.building).filter(Boolean)),
+    ].sort();
   }, [assets]);
 
   const filteredAssets = useMemo(() => {
@@ -231,9 +241,12 @@ export default function App() {
         (asset.room || "").toLowerCase().includes(q) ||
         (asset.notes || "").toLowerCase().includes(q);
 
-      const matchesStatus = statusFilter === "all" || asset.status === statusFilter;
-      const matchesType = typeFilter === "all" || asset.asset_type === typeFilter;
-      const matchesBuilding = buildingFilter === "all" || asset.building === buildingFilter;
+      const matchesStatus =
+        statusFilter === "all" || asset.status === statusFilter;
+      const matchesType =
+        typeFilter === "all" || asset.asset_type === typeFilter;
+      const matchesBuilding =
+        buildingFilter === "all" || asset.building === buildingFilter;
 
       return matchesSearch && matchesStatus && matchesType && matchesBuilding;
     });
@@ -246,6 +259,36 @@ export default function App() {
       inUse: assets.filter((a) => a.status === "in_use").length,
       maintenance: assets.filter((a) => a.status === "maintenance").length,
       lost: assets.filter((a) => a.status === "lost").length,
+    };
+  }, [assets]);
+
+  const maintenanceAlerts = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sevenDaysFromNow = new Date(today);
+    sevenDaysFromNow.setDate(today.getDate() + 7);
+
+    const overdue = [];
+    const dueSoon = [];
+
+    assets.forEach((asset) => {
+      if (!asset.next_maintenance_date) return;
+
+      const dueDate = new Date(asset.next_maintenance_date);
+      dueDate.setHours(0, 0, 0, 0);
+
+      if (dueDate < today) {
+        overdue.push(asset);
+      } else if (dueDate <= sevenDaysFromNow) {
+        dueSoon.push(asset);
+      }
+    });
+
+    return {
+      overdue,
+      dueSoon,
+      total: overdue.length + dueSoon.length,
     };
   }, [assets]);
 
@@ -278,8 +321,98 @@ export default function App() {
   function selectAsset(asset) {
     setSelectedId(asset.id);
     addActivity(`Viewed asset details: ${asset.name}`, "view");
+    scrollToTop();
   }
 
+  function scrollToTop() {
+    setTimeout(() => {
+      if (mainContentRef.current) {
+        mainContentRef.current.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+      }
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }, 150);
+  }
+
+  function startEditAsset(asset) {
+    setEditingAsset({
+      ...asset,
+      image: null,
+    });
+    setSelectedId(asset.id);
+    scrollToTop();
+  }
+
+  function cancelEditAsset() {
+    setEditingAsset(null);
+  }
+
+  async function saveEditedAsset(e) {
+    e.preventDefault();
+
+    const lat = parseFloat(editingAsset.latitude);
+    const lng = parseFloat(editingAsset.longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      alert("Please enter valid latitude and longitude.");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+
+      formData.append("name", editingAsset.name || "");
+      formData.append("asset_tag", editingAsset.asset_tag || "");
+      formData.append("asset_type", editingAsset.asset_type || "");
+      formData.append("status", editingAsset.status || "available");
+      formData.append("condition", editingAsset.condition || "good");
+      formData.append("assigned_to", editingAsset.assigned_to || "");
+      formData.append("building", editingAsset.building || "");
+      formData.append("room", editingAsset.room || "");
+      formData.append("notes", editingAsset.notes || "");
+      formData.append("latitude", lat);
+      formData.append("longitude", lng);
+
+      if (editingAsset.image) {
+        formData.append("image", editingAsset.image);
+      }
+
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/assets/${editingAsset.id}/`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          body: formData,
+        },
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to update asset.");
+      }
+
+      const updatedAsset = await res.json();
+
+      setAssets((prevAssets) =>
+        prevAssets.map((asset) =>
+          asset.id === updatedAsset.id ? updatedAsset : asset,
+        ),
+      );
+
+      setEditingAsset(null);
+      setSelectedId(updatedAsset.id);
+      alert("Asset details updated successfully");
+      addActivity(`Asset edited: ${updatedAsset.name}`, "update");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update asset details.");
+    }
+  }
   async function addAsset(e) {
     e.preventDefault();
 
@@ -302,6 +435,11 @@ export default function App() {
       formData.append("building", newAsset.building || "");
       formData.append("room", newAsset.room || "");
       formData.append("notes", newAsset.notes || "");
+      formData.append("last_checked", newAsset.last_checked || "");
+      formData.append(
+        "next_maintenance_date",
+        newAsset.next_maintenance_date || "",
+      );
       formData.append("latitude", lat);
       formData.append("longitude", lng);
 
@@ -345,7 +483,9 @@ export default function App() {
   }
 
   async function deleteAsset(assetId) {
-    const confirmDelete = window.confirm("Are you sure you want to delete this asset?");
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this asset?",
+    );
     if (!confirmDelete) return;
 
     const deletedAsset = assets.find((asset) => asset.id === assetId);
@@ -359,7 +499,7 @@ export default function App() {
       if (!res.ok) throw new Error("Failed to delete asset.");
 
       setAssets((prevAssets) =>
-        prevAssets.filter((asset) => asset.id !== assetId)
+        prevAssets.filter((asset) => asset.id !== assetId),
       );
 
       alert("Asset deleted successfully");
@@ -398,14 +538,14 @@ export default function App() {
 
       setAssets((prevAssets) =>
         prevAssets.map((asset) =>
-          asset.id === assetId ? updatedAsset : asset
-        )
+          asset.id === assetId ? updatedAsset : asset,
+        ),
       );
 
       alert("Asset updated successfully");
       addActivity(
         `Status updated: ${updatedAsset.name} changed to ${updatedAsset.status}`,
-        "update"
+        "update",
       );
     } catch (err) {
       console.error(err);
@@ -421,37 +561,39 @@ export default function App() {
   }
 
   function clearLogs() {
-    const confirmClear = window.confirm("Are you sure you want to clear all logs?");
+    const confirmClear = window.confirm(
+      "Are you sure you want to clear all logs?",
+    );
     if (!confirmClear) return;
     setActivityLog([]);
   }
 
-const appShellStyle = {
-  display: "grid",
-  gridTemplateColumns: isMobile ? "1fr" : "240px 1fr",
-  minHeight: "100vh",
-  background: "#050505",
-  color: "white",
-};
+  const appShellStyle = {
+    display: "grid",
+    gridTemplateColumns: isMobile ? "1fr" : "240px 1fr",
+    minHeight: "100vh",
+    background: "#050505",
+    color: "white",
+  };
 
-const sidebarStyle = {
-  background: "#0b0b0b",
-  borderRight: "1px solid #1f1f1f",
-  padding: "20px 14px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "12px",
-  position: isMobile ? "fixed" : "sticky",
-  top: 0,
-  left: isMobile ? (sidebarOpen ? "0" : "-270px") : "0",
-  width: "240px",
-  minHeight: "100vh",
-  height: "100vh",
-  alignSelf: "start",
-  zIndex: 999,
-  transition: "0.3s ease",
-  boxSizing: "border-box",
-};
+  const sidebarStyle = {
+    background: "#0b0b0b",
+    borderRight: "1px solid #1f1f1f",
+    padding: "20px 14px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    position: isMobile ? "fixed" : "sticky",
+    top: 0,
+    left: isMobile ? (sidebarOpen ? "0" : "-270px") : "0",
+    width: "240px",
+    minHeight: "100vh",
+    height: "100vh",
+    alignSelf: "start",
+    zIndex: 999,
+    transition: "0.3s ease",
+    boxSizing: "border-box",
+  };
 
   const brandStyle = {
     fontSize: isMobile ? "26px" : "32px",
@@ -570,6 +712,30 @@ const sidebarStyle = {
         </div>
       </div>
 
+      <div style={{ ...panelStyle, marginBottom: "20px" }}>
+        <h3 style={panelTitleStyle}>Maintenance Alerts</h3>
+
+        {maintenanceAlerts.total === 0 ? (
+          <p style={{ opacity: 0.75 }}>No maintenance alerts at the moment.</p>
+        ) : (
+          <>
+            <p style={{ color: "#e74c3c", fontWeight: "bold" }}>
+              Overdue: {maintenanceAlerts.overdue.length}
+            </p>
+            <p style={{ color: "#f39c12", fontWeight: "bold" }}>
+              Due soon: {maintenanceAlerts.dueSoon.length}
+            </p>
+
+            <button
+              style={actionButtonStyle}
+              onClick={() => goToSection("alerts")}
+            >
+              View Maintenance Alerts
+            </button>
+          </>
+        )}
+      </div>
+
       <div style={dashboardPanelsStyle}>
         <div style={panelStyle}>
           <h3 style={panelTitleStyle}>Recent Assets</h3>
@@ -596,7 +762,10 @@ const sidebarStyle = {
           <button style={actionButtonStyle} onClick={() => goToSection("add")}>
             Add New Asset
           </button>
-          <button style={actionButtonStyle} onClick={() => goToSection("assets")}>
+          <button
+            style={actionButtonStyle}
+            onClick={() => goToSection("assets")}
+          >
             Manage Assets
           </button>
           <button style={actionButtonStyle} onClick={() => goToSection("map")}>
@@ -627,6 +796,50 @@ const sidebarStyle = {
     </div>
   );
 
+  const renderAlerts = () => (
+    <div>
+      <h2 style={sectionTitleStyle}>Maintenance Alerts</h2>
+
+      <div style={panelStyle}>
+        <h3 style={panelTitleStyle}>Overdue Maintenance</h3>
+
+        {maintenanceAlerts.overdue.length === 0 ? (
+          <p style={{ opacity: 0.75 }}>No overdue maintenance.</p>
+        ) : (
+          maintenanceAlerts.overdue.map((asset) => (
+            <div
+              key={asset.id}
+              style={alertRowStyle("overdue")}
+              onClick={() => selectAsset(asset)}
+            >
+              <strong>{asset.name}</strong>
+              <span>Due: {asset.next_maintenance_date}</span>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div style={{ ...panelStyle, marginTop: "18px" }}>
+        <h3 style={panelTitleStyle}>Due Soon</h3>
+
+        {maintenanceAlerts.dueSoon.length === 0 ? (
+          <p style={{ opacity: 0.75 }}>No assets due within 7 days.</p>
+        ) : (
+          maintenanceAlerts.dueSoon.map((asset) => (
+            <div
+              key={asset.id}
+              style={alertRowStyle("soon")}
+              onClick={() => selectAsset(asset)}
+            >
+              <strong>{asset.name}</strong>
+              <span>Due: {asset.next_maintenance_date}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
   const renderLogs = () => (
     <div>
       <h2 style={sectionTitleStyle}>Monitoring Logs</h2>
@@ -636,7 +849,8 @@ const sidebarStyle = {
           <div>
             <h3 style={panelTitleStyle}>System Activity History</h3>
             <p style={{ marginTop: "-8px", opacity: 0.7 }}>
-              Full monitoring record of asset and staff actions during this session.
+              Full monitoring record of asset and staff actions during this
+              session.
             </p>
           </div>
 
@@ -655,9 +869,13 @@ const sidebarStyle = {
                   <span style={logBadgeStyle(activity.type)}>
                     {activity.type.toUpperCase()}
                   </span>
-                  <strong style={{ marginLeft: "10px" }}>{activity.message}</strong>
+                  <strong style={{ marginLeft: "10px" }}>
+                    {activity.message}
+                  </strong>
                 </div>
-                <div style={{ fontSize: "13px", opacity: 0.75, marginTop: "6px" }}>
+                <div
+                  style={{ fontSize: "13px", opacity: 0.75, marginTop: "6px" }}
+                >
                   User: {activity.user} • Time: {activity.time}
                 </div>
               </div>
@@ -689,11 +907,31 @@ const sidebarStyle = {
 
             <div>
               <h3 style={{ marginTop: 0 }}>{selectedAsset.name}</h3>
-              <p><strong>Tag:</strong> {selectedAsset.asset_tag || "Not set"}</p>
-              <p><strong>Type:</strong> {selectedAsset.asset_type}</p>
-              <p><strong>Status:</strong> {selectedAsset.status}</p>
-              <p><strong>Condition:</strong> {selectedAsset.condition || "N/A"}</p>
-              <p><strong>Assigned to:</strong> {selectedAsset.assigned_to || "Unassigned"}</p>
+              <p>
+                <strong>Tag:</strong> {selectedAsset.asset_tag || "Not set"}
+              </p>
+              <p>
+                <strong>Type:</strong> {selectedAsset.asset_type}
+              </p>
+              <p>
+                <strong>Status:</strong> {selectedAsset.status}
+              </p>
+              <p>
+                <strong>Condition:</strong> {selectedAsset.condition || "N/A"}
+              </p>
+              <p>
+                <strong>Last checked:</strong>{" "}
+                {selectedAsset.last_checked || "Not set"}
+              </p>
+
+              <p>
+                <strong>Next maintenance:</strong>{" "}
+                {selectedAsset.next_maintenance_date || "Not set"}
+              </p>
+              <p>
+                <strong>Assigned to:</strong>{" "}
+                {selectedAsset.assigned_to || "Unassigned"}
+              </p>
               <p>
                 <strong>Location:</strong> {selectedAsset.building}{" "}
                 {selectedAsset.room ? `• ${selectedAsset.room}` : ""}
@@ -702,19 +940,190 @@ const sidebarStyle = {
                 <strong>Coordinates:</strong> {selectedAsset.latitude},{" "}
                 {selectedAsset.longitude}
               </p>
-              <p><strong>Notes:</strong> {selectedAsset.notes || "No notes added"}</p>
+              <p>
+                <strong>Notes:</strong>{" "}
+                {selectedAsset.notes || "No notes added"}
+              </p>
 
               <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
-                <button style={buttonStyle} onClick={() => focusAsset(selectedAsset)}>
+                <button
+                  style={buttonStyle}
+                  onClick={() => focusAsset(selectedAsset)}
+                >
                   View on Map
                 </button>
 
-                <button style={secondaryButtonStyle} onClick={() => setSelectedId(null)}>
+                <button
+                  style={secondaryButtonStyle}
+                  onClick={() => setSelectedId(null)}
+                >
                   Clear Selection
                 </button>
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {editingAsset && (
+        <div style={detailsPanelStyle}>
+          <h3 style={panelTitleStyle}>Edit Asset Details</h3>
+
+          <form onSubmit={saveEditedAsset}>
+            <input
+              type="text"
+              placeholder="Asset name"
+              value={editingAsset.name || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, name: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
+
+            <input
+              type="text"
+              placeholder="Asset tag"
+              value={editingAsset.asset_tag || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, asset_tag: e.target.value })
+              }
+              style={inputStyle}
+            />
+
+            <input
+              type="text"
+              placeholder="Asset type"
+              value={editingAsset.asset_type || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, asset_type: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
+
+            <select
+              value={editingAsset.status || "available"}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, status: e.target.value })
+              }
+              style={inputStyle}
+            >
+              <option value="available">Available</option>
+              <option value="in_use">In Use</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="lost">Lost</option>
+            </select>
+
+            <select
+              value={editingAsset.condition || "good"}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, condition: e.target.value })
+              }
+              style={inputStyle}
+            >
+              <option value="excellent">Excellent</option>
+              <option value="good">Good</option>
+              <option value="fair">Fair</option>
+              <option value="poor">Poor</option>
+            </select>
+
+            <input
+              type="text"
+              placeholder="Assigned to"
+              value={editingAsset.assigned_to || ""}
+              onChange={(e) =>
+                setEditingAsset({
+                  ...editingAsset,
+                  assigned_to: e.target.value,
+                })
+              }
+              style={inputStyle}
+            />
+
+            <input
+              type="text"
+              placeholder="Building"
+              value={editingAsset.building || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, building: e.target.value })
+              }
+              style={inputStyle}
+            />
+
+            <input
+              type="text"
+              placeholder="Room"
+              value={editingAsset.room || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, room: e.target.value })
+              }
+              style={inputStyle}
+            />
+
+            <textarea
+              placeholder="Notes"
+              value={editingAsset.notes || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, notes: e.target.value })
+              }
+              style={textareaStyle}
+              rows={4}
+            />
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) =>
+                setEditingAsset({
+                  ...editingAsset,
+                  image: e.target.files[0] || null,
+                })
+              }
+              style={inputStyle}
+            />
+
+            <input
+              type="number"
+              step="any"
+              placeholder="Latitude"
+              value={editingAsset.latitude || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, latitude: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
+
+            <input
+              type="number"
+              step="any"
+              placeholder="Longitude"
+              value={editingAsset.longitude || ""}
+              onChange={(e) =>
+                setEditingAsset({ ...editingAsset, longitude: e.target.value })
+              }
+              style={inputStyle}
+              required
+            />
+
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <button
+                type="submit"
+                style={{ ...buttonStyle, flex: "1 1 180px" }}
+              >
+                Save Changes
+              </button>
+
+              <button
+                type="button"
+                onClick={cancelEditAsset}
+                style={{ ...secondaryButtonStyle, flex: "1 1 180px" }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -747,7 +1156,9 @@ const sidebarStyle = {
           >
             <option value="all">All Types</option>
             {assetTypes.map((type) => (
-              <option key={type} value={type}>{type}</option>
+              <option key={type} value={type}>
+                {type}
+              </option>
             ))}
           </select>
 
@@ -758,7 +1169,9 @@ const sidebarStyle = {
           >
             <option value="all">All Buildings</option>
             {buildings.map((building) => (
-              <option key={building} value={building}>{building}</option>
+              <option key={building} value={building}>
+                {building}
+              </option>
             ))}
           </select>
 
@@ -781,7 +1194,11 @@ const sidebarStyle = {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : asset.image ? "180px 1fr" : "1fr",
+                gridTemplateColumns: isMobile
+                  ? "1fr"
+                  : asset.image
+                    ? "180px 1fr"
+                    : "1fr",
                 gap: "16px",
                 alignItems: "start",
               }}
@@ -810,33 +1227,72 @@ const sidebarStyle = {
                 </div>
               )}
 
-              <div onClick={() => selectAsset(asset)} style={{ cursor: "pointer" }}>
-                <div style={{ fontWeight: "bold", fontSize: "18px" }}>{asset.name}</div>
-                <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
+              <div
+                onClick={() => selectAsset(asset)}
+                style={{ cursor: "pointer" }}
+              >
+                <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                  {asset.name}
+                </div>
+                <div
+                  style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}
+                >
                   {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "Tag: Not set"}
                 </div>
                 <div style={{ marginTop: "4px", opacity: 0.9 }}>
                   {asset.asset_type} •{" "}
-                  <span style={statusTextStyle(asset.status)}>{asset.status}</span>
+                  <span style={statusTextStyle(asset.status)}>
+                    {asset.status}
+                  </span>
                 </div>
-                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                <div
+                  style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}
+                >
                   Condition: {asset.condition || "N/A"}
                 </div>
-                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                <div
+                  style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}
+                >
+                  Last checked: {asset.last_checked || "Not set"}
+                </div>
+
+                <div
+                  style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}
+                >
+                  Next maintenance: {asset.next_maintenance_date || "Not set"}
+                </div>
+                <div
+                  style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}
+                >
                   Assigned to: {asset.assigned_to || "Unassigned"}
                 </div>
-                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                <div
+                  style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}
+                >
                   {asset.building} {asset.room ? `• ${asset.room}` : ""}
                 </div>
                 {asset.notes && (
-                  <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.75 }}>
+                  <div
+                    style={{
+                      marginTop: "6px",
+                      fontSize: "13px",
+                      opacity: 0.75,
+                    }}
+                  >
                     Notes: {asset.notes}
                   </div>
                 )}
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                marginTop: "14px",
+                flexWrap: "wrap",
+              }}
+            >
               <select
                 value={asset.status}
                 onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
@@ -847,6 +1303,13 @@ const sidebarStyle = {
                 <option value="maintenance">Maintenance</option>
                 <option value="lost">Lost</option>
               </select>
+
+              <button
+                onClick={() => startEditAsset(asset)}
+                style={{ ...secondaryButtonStyle, flex: "1 1 140px" }}
+              >
+                Edit
+              </button>
 
               <button
                 onClick={() => deleteAsset(asset.id)}
@@ -870,39 +1333,164 @@ const sidebarStyle = {
 
       <div style={formMapLayoutStyle}>
         <form onSubmit={addAsset} style={panelStyle}>
-          <input type="text" placeholder="Asset name" value={newAsset.name} onChange={(e) => setNewAsset({ ...newAsset, name: e.target.value })} style={inputStyle} required />
-          <input type="text" placeholder="Asset tag (e.g. LAP-001)" value={newAsset.asset_tag} onChange={(e) => setNewAsset({ ...newAsset, asset_tag: e.target.value })} style={inputStyle} />
-          <input type="text" placeholder="Asset type" value={newAsset.asset_type} onChange={(e) => setNewAsset({ ...newAsset, asset_type: e.target.value })} style={inputStyle} required />
+          <input
+            type="text"
+            placeholder="Asset name"
+            value={newAsset.name}
+            onChange={(e) => setNewAsset({ ...newAsset, name: e.target.value })}
+            style={inputStyle}
+            required
+          />
+          <input
+            type="text"
+            placeholder="Asset tag (e.g. LAP-001)"
+            value={newAsset.asset_tag}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, asset_tag: e.target.value })
+            }
+            style={inputStyle}
+          />
+          <input
+            type="text"
+            placeholder="Asset type"
+            value={newAsset.asset_type}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, asset_type: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
 
-          <select value={newAsset.status} onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value })} style={inputStyle}>
+          <select
+            value={newAsset.status}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, status: e.target.value })
+            }
+            style={inputStyle}
+          >
             <option value="available">Available</option>
             <option value="in_use">In Use</option>
             <option value="maintenance">Maintenance</option>
             <option value="lost">Lost</option>
           </select>
 
-          <select value={newAsset.condition} onChange={(e) => setNewAsset({ ...newAsset, condition: e.target.value })} style={inputStyle}>
+          <select
+            value={newAsset.condition}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, condition: e.target.value })
+            }
+            style={inputStyle}
+          >
             <option value="excellent">Excellent</option>
             <option value="good">Good</option>
             <option value="fair">Fair</option>
             <option value="poor">Poor</option>
           </select>
 
-          <input type="text" placeholder="Assigned to" value={newAsset.assigned_to} onChange={(e) => setNewAsset({ ...newAsset, assigned_to: e.target.value })} style={inputStyle} />
-          <input type="text" placeholder="Building" value={newAsset.building} onChange={(e) => setNewAsset({ ...newAsset, building: e.target.value })} style={inputStyle} />
-          <input type="text" placeholder="Room" value={newAsset.room} onChange={(e) => setNewAsset({ ...newAsset, room: e.target.value })} style={inputStyle} />
+          <input
+            type="text"
+            placeholder="Assigned to"
+            value={newAsset.assigned_to}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, assigned_to: e.target.value })
+            }
+            style={inputStyle}
+          />
+          <input
+            type="text"
+            placeholder="Building"
+            value={newAsset.building}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, building: e.target.value })
+            }
+            style={inputStyle}
+          />
+          <input
+            type="text"
+            placeholder="Room"
+            value={newAsset.room}
+            onChange={(e) => setNewAsset({ ...newAsset, room: e.target.value })}
+            style={inputStyle}
+          />
 
-          <textarea placeholder="Notes" value={newAsset.notes} onChange={(e) => setNewAsset({ ...newAsset, notes: e.target.value })} style={textareaStyle} rows={4} />
+          <textarea
+            placeholder="Notes"
+            value={newAsset.notes}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, notes: e.target.value })
+            }
+            style={textareaStyle}
+            rows={4}
+          />
 
-          <input type="file" accept="image/*" onChange={(e) => setNewAsset({ ...newAsset, image: e.target.files[0] || null })} style={inputStyle} />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, image: e.target.files[0] || null })
+            }
+            style={inputStyle}
+          />
 
-          <input type="number" step="any" placeholder="Latitude" value={newAsset.latitude || ""} onChange={(e) => setNewAsset({ ...newAsset, latitude: e.target.value })} style={inputStyle} required />
-          <input type="number" step="any" placeholder="Longitude" value={newAsset.longitude || ""} onChange={(e) => setNewAsset({ ...newAsset, longitude: e.target.value })} style={inputStyle} required />
+          <label style={fieldLabelStyle}>Last checked date</label>
+          <input
+            type="date"
+            value={newAsset.last_checked}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, last_checked: e.target.value })
+            }
+            style={inputStyle}
+          />
 
-          <button type="submit" style={buttonStyle}>Add Asset</button>
+          <label style={fieldLabelStyle}>Next maintenance date</label>
+          <input
+            type="date"
+            value={newAsset.next_maintenance_date}
+            onChange={(e) =>
+              setNewAsset({
+                ...newAsset,
+                next_maintenance_date: e.target.value,
+              })
+            }
+            style={inputStyle}
+          />
+
+          <input
+            type="number"
+            step="any"
+            placeholder="Latitude"
+            value={newAsset.latitude || ""}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, latitude: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+          <input
+            type="number"
+            step="any"
+            placeholder="Longitude"
+            value={newAsset.longitude || ""}
+            onChange={(e) =>
+              setNewAsset({ ...newAsset, longitude: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+
+          <button type="submit" style={buttonStyle}>
+            Add Asset
+          </button>
         </form>
 
-        <div style={{ ...panelStyle, height: isMobile ? "420px" : "500px", padding: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            ...panelStyle,
+            height: isMobile ? "420px" : "500px",
+            padding: 0,
+            overflow: "hidden",
+          }}
+        >
           <MapContainer
             center={[51.4816, -3.1791]}
             zoom={15}
@@ -911,7 +1499,10 @@ const sidebarStyle = {
               mapRef.current = map;
             }}
           >
-            <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer
+              attribution="&copy; OpenStreetMap contributors"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
             <MapClickHandler setNewAsset={setNewAsset} />
 
             {assets.map((asset) => (
@@ -925,8 +1516,26 @@ const sidebarStyle = {
                 <Popup>
                   <div>
                     {asset.image && (
-                      <div style={{ width: "220px", height: "120px", overflow: "hidden", borderRadius: "8px", marginBottom: "8px", background: "#111" }}>
-                        <img src={getImageUrl(asset.image)} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                      <div
+                        style={{
+                          width: "220px",
+                          height: "120px",
+                          overflow: "hidden",
+                          borderRadius: "8px",
+                          marginBottom: "8px",
+                          background: "#111",
+                        }}
+                      >
+                        <img
+                          src={getImageUrl(asset.image)}
+                          alt={asset.name}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            display: "block",
+                          }}
+                        />
                       </div>
                     )}
                     <strong>{asset.name}</strong>
@@ -938,6 +1547,10 @@ const sidebarStyle = {
                     Status: {asset.status}
                     <br />
                     Condition: {asset.condition || "N/A"}
+                    <br />
+                    Last checked: {asset.last_checked || "Not set"}
+                    <br />
+                    Next maintenance: {asset.next_maintenance_date || "Not set"}
                     <br />
                     Assigned to: {asset.assigned_to || "Unassigned"}
                     <br />
@@ -962,7 +1575,14 @@ const sidebarStyle = {
     <div>
       <h2 style={sectionTitleStyle}>Map View</h2>
 
-      <div style={{ ...panelStyle, height: isMobile ? "500px" : "620px", padding: 0, overflow: "hidden" }}>
+      <div
+        style={{
+          ...panelStyle,
+          height: isMobile ? "500px" : "620px",
+          padding: 0,
+          overflow: "hidden",
+        }}
+      >
         <MapContainer
           center={[51.4816, -3.1791]}
           zoom={15}
@@ -971,7 +1591,10 @@ const sidebarStyle = {
             mapRef.current = map;
           }}
         >
-          <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
 
           {assets.map((asset) => (
             <Marker
@@ -984,8 +1607,26 @@ const sidebarStyle = {
               <Popup>
                 <div>
                   {asset.image && (
-                    <div style={{ width: "220px", height: "120px", overflow: "hidden", borderRadius: "8px", marginBottom: "8px", background: "#111" }}>
-                      <img src={getImageUrl(asset.image)} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <div
+                      style={{
+                        width: "220px",
+                        height: "120px",
+                        overflow: "hidden",
+                        borderRadius: "8px",
+                        marginBottom: "8px",
+                        background: "#111",
+                      }}
+                    >
+                      <img
+                        src={getImageUrl(asset.image)}
+                        alt={asset.name}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
                     </div>
                   )}
                   <strong>{asset.name}</strong>
@@ -997,6 +1638,10 @@ const sidebarStyle = {
                   Status: {asset.status}
                   <br />
                   Condition: {asset.condition || "N/A"}
+                  <br />
+                  Last checked: {asset.last_checked || "Not set"}
+                  <br />
+                  Next maintenance: {asset.next_maintenance_date || "Not set"}
                   <br />
                   Assigned to: {asset.assigned_to || "Unassigned"}
                   <br />
@@ -1030,10 +1675,30 @@ const sidebarStyle = {
         <form onSubmit={handleLogin} style={loginCardStyle}>
           <h1 style={{ marginTop: 0 }}>LocateIT Staff Login</h1>
 
-          <input type="text" placeholder="Username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} style={inputStyle} required />
-          <input type="password" placeholder="Password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} style={inputStyle} required />
+          <input
+            type="text"
+            placeholder="Username"
+            value={loginForm.username}
+            onChange={(e) =>
+              setLoginForm({ ...loginForm, username: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={loginForm.password}
+            onChange={(e) =>
+              setLoginForm({ ...loginForm, password: e.target.value })
+            }
+            style={inputStyle}
+            required
+          />
 
-          <button type="submit" style={buttonStyle}>Login</button>
+          <button type="submit" style={buttonStyle}>
+            Login
+          </button>
         </form>
       </div>
     );
@@ -1059,23 +1724,46 @@ const sidebarStyle = {
       <aside style={sidebarStyle}>
         <div style={brandStyle}>LOCATEIT</div>
 
-        <button style={navButtonStyle(activeSection === "dashboard")} onClick={() => goToSection("dashboard")}>
+        <button
+          style={navButtonStyle(activeSection === "dashboard")}
+          onClick={() => goToSection("dashboard")}
+        >
           Dashboard
         </button>
 
-        <button style={navButtonStyle(activeSection === "assets")} onClick={() => goToSection("assets")}>
+        <button
+          style={navButtonStyle(activeSection === "assets")}
+          onClick={() => goToSection("assets")}
+        >
           Assets
         </button>
 
-        <button style={navButtonStyle(activeSection === "map")} onClick={() => goToSection("map")}>
+        <button
+          style={navButtonStyle(activeSection === "map")}
+          onClick={() => goToSection("map")}
+        >
           Map View
         </button>
 
-        <button style={navButtonStyle(activeSection === "add")} onClick={() => goToSection("add")}>
+        <button
+          style={navButtonStyle(activeSection === "add")}
+          onClick={() => goToSection("add")}
+        >
           Add Asset
         </button>
 
-        <button style={navButtonStyle(activeSection === "logs")} onClick={() => goToSection("logs")}>
+        <button
+          style={navButtonStyle(activeSection === "alerts")}
+          onClick={() => goToSection("alerts")}
+        >
+          Alerts{" "}
+          {maintenanceAlerts.total > 0 ? `(${maintenanceAlerts.total})` : ""}
+        </button>
+
+        <button
+          style={navButtonStyle(activeSection === "logs")}
+          onClick={() => goToSection("logs")}
+        >
           Logs
         </button>
       </aside>
@@ -1103,7 +1791,14 @@ const sidebarStyle = {
             Asset Monitoring and Management Dashboard
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+            }}
+          >
             <span style={{ opacity: 0.85 }}>Logged in as {username}</span>
             <button
               onClick={handleLogout}
@@ -1121,11 +1816,12 @@ const sidebarStyle = {
           </div>
         </header>
 
-        <main style={contentStyle}>
+        <main ref={mainContentRef} style={contentStyle}>
           {activeSection === "dashboard" && renderDashboard()}
           {activeSection === "assets" && renderAssets()}
           {activeSection === "map" && renderMap()}
           {activeSection === "add" && renderAddAsset()}
+          {activeSection === "alerts" && renderAlerts()}
           {activeSection === "logs" && renderLogs()}
         </main>
       </div>
@@ -1139,10 +1835,10 @@ const statusTextStyle = (status) => ({
     status === "available"
       ? "#2ecc71"
       : status === "in_use"
-      ? "#3498db"
-      : status === "maintenance"
-      ? "#f39c12"
-      : "#e74c3c",
+        ? "#3498db"
+        : status === "maintenance"
+          ? "#f39c12"
+          : "#e74c3c",
 });
 
 const logBadgeStyle = (type) => ({
@@ -1154,12 +1850,12 @@ const logBadgeStyle = (type) => ({
     type === "create"
       ? "#2ecc71"
       : type === "update"
-      ? "#3498db"
-      : type === "delete"
-      ? "#e74c3c"
-      : type === "login"
-      ? "#f39c12"
-      : "#d0d0d0",
+        ? "#3498db"
+        : type === "delete"
+          ? "#e74c3c"
+          : type === "login"
+            ? "#f39c12"
+            : "#d0d0d0",
 });
 
 const sectionTitleStyle = {
@@ -1370,3 +2066,24 @@ const detailsImageStyle = {
   objectFit: "cover",
   display: "block",
 };
+
+const fieldLabelStyle = {
+  display: "block",
+  marginBottom: "6px",
+  fontSize: "13px",
+  color: "#d0d0d0",
+  fontWeight: "bold",
+};
+
+const alertRowStyle = (type) => ({
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "12px",
+  padding: "12px",
+  marginBottom: "10px",
+  borderRadius: "10px",
+  border: type === "overdue" ? "1px solid #7f1d1d" : "1px solid #7a4f00",
+  background: type === "overdue" ? "#1a0808" : "#1a1205",
+  color: "white",
+  cursor: "pointer",
+});
