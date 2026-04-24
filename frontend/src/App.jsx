@@ -22,10 +22,7 @@ L.Icon.Default.mergeOptions({
 function getImageUrl(imagePath) {
   if (!imagePath) return null;
 
-  if (
-    imagePath.startsWith("http://") ||
-    imagePath.startsWith("https://")
-  ) {
+  if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
     return imagePath;
   }
 
@@ -68,6 +65,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState("");
   const [activeSection, setActiveSection] = useState("dashboard");
+  const [activityLog, setActivityLog] = useState([]);
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -94,6 +92,18 @@ export default function App() {
   useEffect(() => {
     checkSession();
   }, []);
+
+  function addActivity(message, type = "info") {
+    const newActivity = {
+      id: Date.now(),
+      message,
+      type,
+      user: username || "system",
+      time: new Date().toLocaleString(),
+    };
+
+    setActivityLog((prev) => [newActivity, ...prev]);
+  }
 
   async function checkSession() {
     try {
@@ -141,6 +151,7 @@ export default function App() {
       setIsAuthenticated(true);
       setUsername(data.username);
       setLoginForm({ username: "", password: "" });
+      addActivity(`Staff login: ${data.username}`, "login");
       await loadAssets();
     } catch (err) {
       console.error(err);
@@ -149,6 +160,8 @@ export default function App() {
   }
 
   async function handleLogout() {
+    addActivity(`Staff logout: ${username}`, "logout");
+
     try {
       await fetch("http://127.0.0.1:8000/api/logout/", {
         method: "POST",
@@ -188,12 +201,16 @@ export default function App() {
   }
 
   const assetTypes = useMemo(() => {
-    const unique = [...new Set(assets.map((asset) => asset.asset_type).filter(Boolean))];
+    const unique = [
+      ...new Set(assets.map((asset) => asset.asset_type).filter(Boolean)),
+    ];
     return unique.sort();
   }, [assets]);
 
   const buildings = useMemo(() => {
-    const unique = [...new Set(assets.map((asset) => asset.building).filter(Boolean))];
+    const unique = [
+      ...new Set(assets.map((asset) => asset.building).filter(Boolean)),
+    ];
     return unique.sort();
   }, [assets]);
 
@@ -237,12 +254,15 @@ export default function App() {
   }, [assets]);
 
   const selectedAsset = useMemo(() => {
-  return assets.find((asset) => asset.id === selectedId) || null;
-}, [assets, selectedId]);
+    return assets.find((asset) => asset.id === selectedId) || null;
+  }, [assets, selectedId]);
+
+  const recentActivity = activityLog.slice(0, 5);
 
   const focusAsset = (asset) => {
     setSelectedId(asset.id);
     setActiveSection("map");
+    addActivity(`Viewed asset on map: ${asset.name}`, "view");
 
     const lat = Number(asset.latitude);
     const lng = Number(asset.longitude);
@@ -256,6 +276,11 @@ export default function App() {
       if (marker) marker.openPopup();
     }, 250);
   };
+
+  function selectAsset(asset) {
+    setSelectedId(asset.id);
+    addActivity(`Viewed asset details: ${asset.name}`, "view");
+  }
 
   async function addAsset(e) {
     e.preventDefault();
@@ -316,6 +341,7 @@ export default function App() {
       });
 
       alert("Asset added successfully");
+      addActivity(`Asset added: ${createdAsset.name}`, "create");
     } catch (err) {
       console.error(err);
       alert("Failed to add asset. Please check the form.");
@@ -327,6 +353,8 @@ export default function App() {
       "Are you sure you want to delete this asset?"
     );
     if (!confirmDelete) return;
+
+    const deletedAsset = assets.find((asset) => asset.id === assetId);
 
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/assets/${assetId}/`, {
@@ -341,7 +369,12 @@ export default function App() {
       setAssets((prevAssets) =>
         prevAssets.filter((asset) => asset.id !== assetId)
       );
+
       alert("Asset deleted successfully");
+
+      if (deletedAsset) {
+        addActivity(`Asset deleted: ${deletedAsset.name}`, "delete");
+      }
 
       if (selectedId === assetId) {
         setSelectedId(null);
@@ -374,12 +407,17 @@ export default function App() {
       }
 
       const updatedAsset = await res.json();
-      alert("Asset updated successfully");
 
       setAssets((prevAssets) =>
         prevAssets.map((asset) =>
           asset.id === assetId ? updatedAsset : asset
         )
+      );
+
+      alert("Asset updated successfully");
+      addActivity(
+        `Status updated: ${updatedAsset.name} changed to ${updatedAsset.status}`,
+        "update"
       );
     } catch (err) {
       console.error(err);
@@ -392,6 +430,12 @@ export default function App() {
     setStatusFilter("all");
     setTypeFilter("all");
     setBuildingFilter("all");
+  }
+
+  function clearLogs() {
+    const confirmClear = window.confirm("Are you sure you want to clear all logs?");
+    if (!confirmClear) return;
+    setActivityLog([]);
   }
 
   const renderDashboard = () => (
@@ -445,21 +489,7 @@ export default function App() {
                   {asset.asset_type} • {asset.building}
                 </div>
               </div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color:
-                    asset.status === "available"
-                      ? "#2ecc71"
-                      : asset.status === "in_use"
-                      ? "#3498db"
-                      : asset.status === "maintenance"
-                      ? "#f39c12"
-                      : "#e74c3c",
-                }}
-              >
-                {asset.status}
-              </div>
+              <div style={statusTextStyle(asset.status)}>{asset.status}</div>
             </div>
           ))}
         </div>
@@ -484,226 +514,319 @@ export default function App() {
           >
             Open Map View
           </button>
+          <button
+            style={actionButtonStyle}
+            onClick={() => setActiveSection("logs")}
+          >
+            View Logs
+          </button>
         </div>
+      </div>
+
+      <div style={{ ...panelStyle, marginTop: "20px" }}>
+        <h3 style={panelTitleStyle}>Recent Activity</h3>
+
+        {recentActivity.length === 0 ? (
+          <p style={{ opacity: 0.75 }}>No recent activity yet.</p>
+        ) : (
+          recentActivity.map((activity) => (
+            <div key={activity.id} style={activityRowStyle}>
+              <div>{activity.message}</div>
+              <div style={{ fontSize: "12px", opacity: 0.65 }}>
+                {activity.time}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const renderLogs = () => (
+    <div>
+      <h2 style={sectionTitleStyle}>Monitoring Logs</h2>
+
+      <div style={panelStyle}>
+        <div style={logsHeaderStyle}>
+          <div>
+            <h3 style={panelTitleStyle}>System Activity History</h3>
+            <p style={{ marginTop: "-8px", opacity: 0.7 }}>
+              Full monitoring record of asset and staff actions during this session.
+            </p>
+          </div>
+
+          <button style={secondaryButtonStyle} onClick={clearLogs}>
+            Clear Logs
+          </button>
+        </div>
+
+        {activityLog.length === 0 ? (
+          <p style={{ opacity: 0.75 }}>No logs recorded yet.</p>
+        ) : (
+          <div style={{ display: "grid", gap: "10px" }}>
+            {activityLog.map((activity) => (
+              <div key={activity.id} style={logCardStyle}>
+                <div>
+                  <span style={logBadgeStyle(activity.type)}>
+                    {activity.type.toUpperCase()}
+                  </span>
+                  <strong style={{ marginLeft: "10px" }}>
+                    {activity.message}
+                  </strong>
+                </div>
+
+                <div style={{ fontSize: "13px", opacity: 0.75, marginTop: "6px" }}>
+                  User: {activity.user} • Time: {activity.time}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 
   const renderAssets = () => (
-  <div>
-    <h2 style={sectionTitleStyle}>Assets</h2>
+    <div>
+      <h2 style={sectionTitleStyle}>Assets</h2>
 
-    {selectedAsset && (
-      <div style={detailsPanelStyle}>
-        <h3 style={panelTitleStyle}>Selected Asset Details</h3>
+      {selectedAsset && (
+        <div style={detailsPanelStyle}>
+          <h3 style={panelTitleStyle}>Selected Asset Details</h3>
 
-        <div style={detailsContentStyle}>
-          {selectedAsset.image && (
-            <div style={detailsImageBoxStyle}>
-              <img
-                src={getImageUrl(selectedAsset.image)}
-                alt={selectedAsset.name}
-                style={detailsImageStyle}
-              />
-            </div>
-          )}
-
-          <div>
-            <h3 style={{ marginTop: 0 }}>{selectedAsset.name}</h3>
-            <p><strong>Tag:</strong> {selectedAsset.asset_tag || "Not set"}</p>
-            <p><strong>Type:</strong> {selectedAsset.asset_type}</p>
-            <p><strong>Status:</strong> {selectedAsset.status}</p>
-            <p><strong>Condition:</strong> {selectedAsset.condition || "N/A"}</p>
-            <p><strong>Assigned to:</strong> {selectedAsset.assigned_to || "Unassigned"}</p>
-            <p><strong>Location:</strong> {selectedAsset.building} {selectedAsset.room ? `• ${selectedAsset.room}` : ""}</p>
-            <p><strong>Coordinates:</strong> {selectedAsset.latitude}, {selectedAsset.longitude}</p>
-            <p><strong>Notes:</strong> {selectedAsset.notes || "No notes added"}</p>
-
-            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
-              <button
-                style={buttonStyle}
-                onClick={() => focusAsset(selectedAsset)}
-              >
-                View on Map
-              </button>
-
-              <button
-                style={secondaryButtonStyle}
-                onClick={() => setSelectedId(null)}
-              >
-                Clear Selection
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
-
-    <div style={filtersPanelStyle}>
-      <input
-        type="text"
-        placeholder="Search by name, tag, type, status, assignee..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        style={{ ...inputStyle, marginBottom: 0 }}
-      />
-
-      <div style={filtersGridStyle}>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-          <option value="all">All Statuses</option>
-          <option value="available">Available</option>
-          <option value="in_use">In Use</option>
-          <option value="maintenance">Maintenance</option>
-          <option value="lost">Lost</option>
-        </select>
-
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-          <option value="all">All Types</option>
-          {assetTypes.map((type) => (
-            <option key={type} value={type}>{type}</option>
-          ))}
-        </select>
-
-        <select value={buildingFilter} onChange={(e) => setBuildingFilter(e.target.value)} style={{ ...inputStyle, marginBottom: 0 }}>
-          <option value="all">All Buildings</option>
-          {buildings.map((building) => (
-            <option key={building} value={building}>{building}</option>
-          ))}
-        </select>
-
-        <button onClick={clearFilters} style={secondaryButtonStyle}>
-          Clear Filters
-        </button>
-      </div>
-
-      <div style={{ fontSize: "13px", opacity: 0.75 }}>
-        Showing {filteredAssets.length} of {assets.length} assets
-      </div>
-    </div>
-
-    {loading && <p>Loading assets...</p>}
-    {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
-
-    <div style={{ display: "grid", gap: "12px" }}>
-      {filteredAssets.map((asset) => (
-        <div key={asset.id} style={assetManagementCardStyle}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: asset.image ? "180px 1fr" : "1fr",
-              gap: "16px",
-              alignItems: "start",
-            }}
-          >
-            {asset.image && (
-              <div
-                style={{
-                  width: "180px",
-                  height: "180px",
-                  overflow: "hidden",
-                  borderRadius: "10px",
-                  border: "1px solid #242424",
-                  background: "#111",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
+          <div style={detailsContentStyle}>
+            {selectedAsset.image && (
+              <div style={detailsImageBoxStyle}>
                 <img
-                  src={getImageUrl(asset.image)}
-                  alt={asset.name}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    display: "block",
-                  }}
+                  src={getImageUrl(selectedAsset.image)}
+                  alt={selectedAsset.name}
+                  style={detailsImageStyle}
                 />
               </div>
             )}
 
-            <div
-              onClick={() => setSelectedId(asset.id)}
-              style={{ cursor: "pointer" }}
-            >
-              <div style={{ fontWeight: "bold", fontSize: "18px" }}>
-                {asset.name}
-              </div>
+            <div>
+              <h3 style={{ marginTop: 0 }}>{selectedAsset.name}</h3>
+              <p>
+                <strong>Tag:</strong> {selectedAsset.asset_tag || "Not set"}
+              </p>
+              <p>
+                <strong>Type:</strong> {selectedAsset.asset_type}
+              </p>
+              <p>
+                <strong>Status:</strong> {selectedAsset.status}
+              </p>
+              <p>
+                <strong>Condition:</strong> {selectedAsset.condition || "N/A"}
+              </p>
+              <p>
+                <strong>Assigned to:</strong>{" "}
+                {selectedAsset.assigned_to || "Unassigned"}
+              </p>
+              <p>
+                <strong>Location:</strong> {selectedAsset.building}{" "}
+                {selectedAsset.room ? `• ${selectedAsset.room}` : ""}
+              </p>
+              <p>
+                <strong>Coordinates:</strong> {selectedAsset.latitude},{" "}
+                {selectedAsset.longitude}
+              </p>
+              <p>
+                <strong>Notes:</strong>{" "}
+                {selectedAsset.notes || "No notes added"}
+              </p>
 
-              <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
-                {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "Tag: Not set"}
-              </div>
-
-              <div style={{ marginTop: "4px", opacity: 0.9 }}>
-                {asset.asset_type} •{" "}
-                <span
-                  style={{
-                    color:
-                      asset.status === "available"
-                        ? "#2ecc71"
-                        : asset.status === "in_use"
-                        ? "#3498db"
-                        : asset.status === "maintenance"
-                        ? "#f39c12"
-                        : "#e74c3c",
-                  }}
+              <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+                <button
+                  style={buttonStyle}
+                  onClick={() => focusAsset(selectedAsset)}
                 >
-                  {asset.status}
-                </span>
-              </div>
+                  View on Map
+                </button>
 
-              <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
-                Condition: {asset.condition || "N/A"}
+                <button
+                  style={secondaryButtonStyle}
+                  onClick={() => setSelectedId(null)}
+                >
+                  Clear Selection
+                </button>
               </div>
-
-              <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
-                Assigned to: {asset.assigned_to || "Unassigned"}
-              </div>
-
-              <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
-                {asset.building} {asset.room ? `• ${asset.room}` : ""}
-              </div>
-
-              {asset.notes && (
-                <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.75 }}>
-                  Notes: {asset.notes}
-                </div>
-              )}
             </div>
           </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: "10px",
-              marginTop: "14px",
-              flexWrap: "wrap",
-            }}
-          >
-            <select
-              value={asset.status}
-              onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
-              style={{ ...inputStyle, marginBottom: 0, flex: "1 1 180px" }}
-            >
-              <option value="available">Available</option>
-              <option value="in_use">In Use</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="lost">Lost</option>
-            </select>
-
-            <button
-              onClick={() => deleteAsset(asset.id)}
-              style={{ ...dangerButtonStyle, flex: "1 1 140px" }}
-            >
-              Delete
-            </button>
-          </div>
         </div>
-      ))}
+      )}
+
+      <div style={filtersPanelStyle}>
+        <input
+          type="text"
+          placeholder="Search by name, tag, type, status, assignee..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ ...inputStyle, marginBottom: 0 }}
+        />
+
+        <div style={filtersGridStyle}>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }}
+          >
+            <option value="all">All Statuses</option>
+            <option value="available">Available</option>
+            <option value="in_use">In Use</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="lost">Lost</option>
+          </select>
+
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }}
+          >
+            <option value="all">All Types</option>
+            {assetTypes.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={buildingFilter}
+            onChange={(e) => setBuildingFilter(e.target.value)}
+            style={{ ...inputStyle, marginBottom: 0 }}
+          >
+            <option value="all">All Buildings</option>
+            {buildings.map((building) => (
+              <option key={building} value={building}>
+                {building}
+              </option>
+            ))}
+          </select>
+
+          <button onClick={clearFilters} style={secondaryButtonStyle}>
+            Clear Filters
+          </button>
+        </div>
+
+        <div style={{ fontSize: "13px", opacity: 0.75 }}>
+          Showing {filteredAssets.length} of {assets.length} assets
+        </div>
+      </div>
+
+      {loading && <p>Loading assets...</p>}
+      {errorMsg && <p style={{ color: "red" }}>{errorMsg}</p>}
+
+      <div style={{ display: "grid", gap: "12px" }}>
+        {filteredAssets.map((asset) => (
+          <div key={asset.id} style={assetManagementCardStyle}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: asset.image ? "180px 1fr" : "1fr",
+                gap: "16px",
+                alignItems: "start",
+              }}
+            >
+              {asset.image && (
+                <div
+                  style={{
+                    width: "180px",
+                    height: "180px",
+                    overflow: "hidden",
+                    borderRadius: "10px",
+                    border: "1px solid #242424",
+                    background: "#111",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <img
+                    src={getImageUrl(asset.image)}
+                    alt={asset.name}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                </div>
+              )}
+
+              <div onClick={() => selectAsset(asset)} style={{ cursor: "pointer" }}>
+                <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                  {asset.name}
+                </div>
+
+                <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
+                  {asset.asset_tag ? `Tag: ${asset.asset_tag}` : "Tag: Not set"}
+                </div>
+
+                <div style={{ marginTop: "4px", opacity: 0.9 }}>
+                  {asset.asset_type} •{" "}
+                  <span style={statusTextStyle(asset.status)}>{asset.status}</span>
+                </div>
+
+                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                  Condition: {asset.condition || "N/A"}
+                </div>
+
+                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                  Assigned to: {asset.assigned_to || "Unassigned"}
+                </div>
+
+                <div style={{ marginTop: "4px", fontSize: "13px", opacity: 0.8 }}>
+                  {asset.building} {asset.room ? `• ${asset.room}` : ""}
+                </div>
+
+                {asset.notes && (
+                  <div
+                    style={{
+                      marginTop: "6px",
+                      fontSize: "13px",
+                      opacity: 0.75,
+                    }}
+                  >
+                    Notes: {asset.notes}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                marginTop: "14px",
+                flexWrap: "wrap",
+              }}
+            >
+              <select
+                value={asset.status}
+                onChange={(e) => updateAssetStatus(asset.id, e.target.value)}
+                style={{ ...inputStyle, marginBottom: 0, flex: "1 1 180px" }}
+              >
+                <option value="available">Available</option>
+                <option value="in_use">In Use</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="lost">Lost</option>
+              </select>
+
+              <button
+                onClick={() => deleteAsset(asset.id)}
+                style={{ ...dangerButtonStyle, flex: "1 1 140px" }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
 
   const renderAddAsset = () => (
     <div>
@@ -851,7 +974,12 @@ export default function App() {
         </form>
 
         <div
-          style={{ ...panelStyle, height: "500px", padding: 0, overflow: "hidden" }}
+          style={{
+            ...panelStyle,
+            height: "500px",
+            padding: 0,
+            overflow: "hidden",
+          }}
         >
           <MapContainer
             center={[51.4816, -3.1791]}
@@ -891,9 +1019,6 @@ export default function App() {
                         <img
                           src={getImageUrl(asset.image)}
                           alt={asset.name}
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                          }}
                           style={{
                             width: "100%",
                             height: "100%",
@@ -936,7 +1061,12 @@ export default function App() {
     <div>
       <h2 style={sectionTitleStyle}>Map View</h2>
       <div
-        style={{ ...panelStyle, height: "620px", padding: 0, overflow: "hidden" }}
+        style={{
+          ...panelStyle,
+          height: "620px",
+          padding: 0,
+          overflow: "hidden",
+        }}
       >
         <MapContainer
           center={[51.4816, -3.1791]}
@@ -975,9 +1105,6 @@ export default function App() {
                       <img
                         src={getImageUrl(asset.image)}
                         alt={asset.name}
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
                         style={{
                           width: "100%",
                           height: "100%",
@@ -1070,23 +1197,33 @@ export default function App() {
         >
           Dashboard
         </button>
+
         <button
           style={navButtonStyle(activeSection === "assets")}
           onClick={() => setActiveSection("assets")}
         >
           Assets
         </button>
+
         <button
           style={navButtonStyle(activeSection === "map")}
           onClick={() => setActiveSection("map")}
         >
           Map View
         </button>
+
         <button
           style={navButtonStyle(activeSection === "add")}
           onClick={() => setActiveSection("add")}
         >
           Add Asset
+        </button>
+
+        <button
+          style={navButtonStyle(activeSection === "logs")}
+          onClick={() => setActiveSection("logs")}
+        >
+          Logs
         </button>
       </aside>
 
@@ -1119,11 +1256,41 @@ export default function App() {
           {activeSection === "assets" && renderAssets()}
           {activeSection === "map" && renderMap()}
           {activeSection === "add" && renderAddAsset()}
+          {activeSection === "logs" && renderLogs()}
         </main>
       </div>
     </div>
   );
 }
+
+const statusTextStyle = (status) => ({
+  fontSize: "13px",
+  color:
+    status === "available"
+      ? "#2ecc71"
+      : status === "in_use"
+      ? "#3498db"
+      : status === "maintenance"
+      ? "#f39c12"
+      : "#e74c3c",
+});
+
+const logBadgeStyle = (type) => ({
+  fontSize: "11px",
+  padding: "4px 8px",
+  borderRadius: "999px",
+  border: "1px solid #333",
+  color:
+    type === "create"
+      ? "#2ecc71"
+      : type === "update"
+      ? "#3498db"
+      : type === "delete"
+      ? "#e74c3c"
+      : type === "login"
+      ? "#f39c12"
+      : "#d0d0d0",
+});
 
 const appShellStyle = {
   display: "grid",
@@ -1207,7 +1374,6 @@ const statCardStyle = {
   borderRadius: "14px",
   padding: "18px",
   textAlign: "center",
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
 };
 
 const statNumberStyle = {
@@ -1235,7 +1401,21 @@ const panelStyle = {
   border: "1px solid #1f1f1f",
   borderRadius: "14px",
   padding: "20px",
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
+};
+
+const logsHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: "16px",
+  marginBottom: "16px",
+};
+
+const logCardStyle = {
+  background: "#080808",
+  border: "1px solid #242424",
+  borderRadius: "10px",
+  padding: "14px",
 };
 
 const filtersPanelStyle = {
@@ -1269,6 +1449,12 @@ const miniAssetRowStyle = {
   padding: "12px 0",
   borderBottom: "1px solid #1f1f1f",
   cursor: "pointer",
+};
+
+const activityRowStyle = {
+  padding: "12px 0",
+  borderBottom: "1px solid #1f1f1f",
+  fontSize: "14px",
 };
 
 const assetManagementCardStyle = {
@@ -1372,7 +1558,6 @@ const loginCardStyle = {
   border: "1px solid #1f1f1f",
   borderRadius: "14px",
   padding: "28px",
-  boxShadow: "0 0 0 1px rgba(255,255,255,0.02)",
 };
 
 const detailsPanelStyle = {
