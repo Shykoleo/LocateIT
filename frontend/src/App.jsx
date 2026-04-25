@@ -568,6 +568,73 @@ export default function App() {
     setActivityLog([]);
   }
 
+  function downloadCSV(filename, rows) {
+    if (!rows || rows.length === 0) {
+      alert("No data available to export.");
+      return;
+    }
+
+    const headers = Object.keys(rows[0]);
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) =>
+        headers
+          .map((header) => {
+            const value = row[header] ?? "";
+            return `"${String(value).replaceAll('"', '""')}"`;
+          })
+          .join(","),
+      ),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function exportAssetsCSV() {
+    const rows = assets.map((asset) => ({
+      id: asset.id,
+      name: asset.name,
+      asset_tag: asset.asset_tag || "",
+      asset_type: asset.asset_type,
+      status: asset.status,
+      condition: asset.condition,
+      assigned_to: asset.assigned_to || "",
+      building: asset.building || "",
+      room: asset.room || "",
+      last_checked: asset.last_checked || "",
+      next_maintenance_date: asset.next_maintenance_date || "",
+      latitude: asset.latitude,
+      longitude: asset.longitude,
+      notes: asset.notes || "",
+      created_at: asset.created_at || "",
+    }));
+
+    downloadCSV("locateit_assets_report.csv", rows);
+    addActivity("Exported assets CSV report", "export");
+  }
+
+  function exportLogsCSV() {
+    const rows = activityLog.map((log) => ({
+      id: log.id,
+      type: log.type,
+      message: log.message,
+      user: log.user,
+      time: log.time,
+    }));
+
+    downloadCSV("locateit_activity_logs.csv", rows);
+    addActivity("Exported activity logs CSV report", "export");
+  }
+
   const appShellStyle = {
     display: "grid",
     gridTemplateColumns: isMobile ? "1fr" : "240px 1fr",
@@ -774,6 +841,13 @@ export default function App() {
           <button style={actionButtonStyle} onClick={() => goToSection("logs")}>
             View Logs
           </button>
+          <button style={actionButtonStyle} onClick={exportAssetsCSV}>
+            Export Assets CSV
+          </button>
+
+          <button style={actionButtonStyle} onClick={exportLogsCSV}>
+            Export Logs CSV
+          </button>
         </div>
       </div>
 
@@ -854,9 +928,15 @@ export default function App() {
             </p>
           </div>
 
-          <button style={secondaryButtonStyle} onClick={clearLogs}>
-            Clear Logs
-          </button>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button style={secondaryButtonStyle} onClick={exportLogsCSV}>
+              Export Logs CSV
+            </button>
+
+            <button style={secondaryButtonStyle} onClick={clearLogs}>
+              Clear Logs
+            </button>
+          </div>
         </div>
 
         {activityLog.length === 0 ? (
