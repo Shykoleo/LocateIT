@@ -13,6 +13,27 @@ import { QRCodeCanvas } from "qrcode.react";
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
+import locateitLogo from "./assets/locateit-logo.png";
+import uswLogo from "./assets/usw-logo.png";
+
+import {
+  LayoutDashboard,
+  Package,
+  Map,
+  PlusSquare,
+  Bell,
+  ClipboardList,
+  Box,
+  CheckCircle,
+  User,
+  Wrench,
+  AlertTriangle,
+  Plus,
+  FolderOpen,
+  FileText,
+  Download,
+  FileSpreadsheet,
+} from "lucide-react";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -63,6 +84,7 @@ export default function App() {
 
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const [newAsset, setNewAsset] = useState({
     name: "",
@@ -140,6 +162,14 @@ export default function App() {
     };
 
     setActivityLog((prev) => [newActivity, ...prev]);
+  }
+
+  function showToast(message, type = "success") {
+    setToast({ message, type });
+
+    setTimeout(() => {
+      setToast(null);
+    }, 3000);
   }
 
   function getAssetQrUrl(assetId) {
@@ -430,11 +460,11 @@ export default function App() {
 
       setEditingAsset(null);
       setSelectedId(updatedAsset.id);
-      alert("Asset details updated successfully");
+      showToast("Asset details updated successfully", "success");
       addActivity(`Asset edited: ${updatedAsset.name}`, "update");
     } catch (err) {
       console.error(err);
-      alert("Failed to update asset details.");
+      showToast("Failed to update asset details.", "error");
     }
   }
   async function addAsset(e) {
@@ -498,7 +528,7 @@ export default function App() {
         longitude: "",
       });
 
-      alert("Asset added successfully");
+      showToast("Asset added successfully", "success");
       addActivity(`Asset added: ${createdAsset.name}`, "create");
     } catch (err) {
       console.error(err);
@@ -526,7 +556,7 @@ export default function App() {
         prevAssets.filter((asset) => asset.id !== assetId),
       );
 
-      alert("Asset deleted successfully");
+      showToast("Asset deleted successfully", "success");
 
       if (deletedAsset) {
         addActivity(`Asset deleted: ${deletedAsset.name}`, "delete");
@@ -772,30 +802,49 @@ export default function App() {
     <div>
       <h2 style={sectionTitleStyle}>Dashboard</h2>
 
+      <p style={subtitleStyle}>
+        Real-time overview of assets, maintenance status and monitoring
+        activity.
+      </p>
       <div style={statsRowStyle}>
         <div style={statCardStyle}>
+          <div style={statIconBoxStyle("#e74c3c")}>
+            <Box size={24} />
+          </div>
           <div style={statNumberStyle}>{stats.total}</div>
           <div style={statLabelStyle}>Total Assets</div>
         </div>
         <div style={statCardStyle}>
+          <div style={statIconBoxStyle("#e74c3c")}>
+            <CheckCircle size={24} />
+          </div>
           <div style={{ ...statNumberStyle, color: "#2ecc71" }}>
             {stats.available}
           </div>
           <div style={statLabelStyle}>Available</div>
         </div>
         <div style={statCardStyle}>
+          <div style={statIconBoxStyle("#e74c3c")}>
+            <User size={24} />
+          </div>
           <div style={{ ...statNumberStyle, color: "#3498db" }}>
             {stats.inUse}
           </div>
           <div style={statLabelStyle}>In Use</div>
         </div>
         <div style={statCardStyle}>
+          <div style={statIconBoxStyle("#e74c3c")}>
+            <Wrench size={24} />
+          </div>
           <div style={{ ...statNumberStyle, color: "#f39c12" }}>
             {stats.maintenance}
           </div>
           <div style={statLabelStyle}>Maintenance</div>
         </div>
         <div style={statCardStyle}>
+          <div style={statIconBoxStyle("#e74c3c")}>
+            <AlertTriangle size={24} />
+          </div>
           <div style={{ ...statNumberStyle, color: "#e74c3c" }}>
             {stats.lost}
           </div>
@@ -851,26 +900,44 @@ export default function App() {
         <div style={panelStyle}>
           <h3 style={panelTitleStyle}>Quick Actions</h3>
           <button style={actionButtonStyle} onClick={() => goToSection("add")}>
-            Add New Asset
+            <span style={buttonIconTextStyle}>
+              <Plus size={18} />
+              Add New Asset
+            </span>
           </button>
           <button
             style={actionButtonStyle}
             onClick={() => goToSection("assets")}
           >
-            Manage Assets
+            <span style={buttonIconTextStyle}>
+              <FolderOpen size={18} />
+              Manage Assets
+            </span>
           </button>
           <button style={actionButtonStyle} onClick={() => goToSection("map")}>
-            Open Map View
+            <span style={buttonIconTextStyle}>
+              <Map size={18} />
+              Open Map View
+            </span>
           </button>
           <button style={actionButtonStyle} onClick={() => goToSection("logs")}>
-            View Logs
+            <span style={buttonIconTextStyle}>
+              <FileText size={18} />
+              View Logs
+            </span>
           </button>
           <button style={actionButtonStyle} onClick={exportAssetsCSV}>
-            Export Assets CSV
+            <span style={buttonIconTextStyle}>
+              <FileSpreadsheet size={18} />
+              Export Assets CSV
+            </span>
           </button>
 
           <button style={actionButtonStyle} onClick={exportLogsCSV}>
-            Export Logs CSV
+            <span style={buttonIconTextStyle}>
+              <Download size={18} />
+              Export Logs CSV
+            </span>
           </button>
         </div>
       </div>
@@ -1794,7 +1861,16 @@ export default function App() {
     return (
       <div style={loginPageStyle}>
         <form onSubmit={handleLogin} style={loginCardStyle}>
-          <h1 style={{ marginTop: 0 }}>LocateIT Staff Login</h1>
+          <div style={loginLogoWrapStyle}>
+            <img
+              src={locateitLogo}
+              alt="LocateIT Logo"
+              style={loginLogoStyle}
+            />
+          </div>
+          {/* <p style={loginSubtitleStyle}>
+          Secure access to the Asset Monitoring System
+        </p> */}
 
           <input
             type="text"
@@ -1826,127 +1902,180 @@ export default function App() {
   }
 
   return (
-    <div style={appShellStyle}>
-      {isMobile && sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            background: "rgba(0,0,0,0.55)",
-            zIndex: 998,
-          }}
-        />
-      )}
-
-      <aside style={sidebarStyle}>
-        <div style={brandStyle}>LOCATEIT</div>
-
-        <button
-          style={navButtonStyle(activeSection === "dashboard")}
-          onClick={() => goToSection("dashboard")}
-        >
-          Dashboard
-        </button>
-
-        <button
-          style={navButtonStyle(activeSection === "assets")}
-          onClick={() => goToSection("assets")}
-        >
-          Assets
-        </button>
-
-        <button
-          style={navButtonStyle(activeSection === "map")}
-          onClick={() => goToSection("map")}
-        >
-          Map View
-        </button>
-
-        <button
-          style={navButtonStyle(activeSection === "add")}
-          onClick={() => goToSection("add")}
-        >
-          Add Asset
-        </button>
-
-        <button
-          style={navButtonStyle(activeSection === "alerts")}
-          onClick={() => goToSection("alerts")}
-        >
-          Alerts{" "}
-          {maintenanceAlerts.total > 0 ? `(${maintenanceAlerts.total})` : ""}
-        </button>
-
-        <button
-          style={navButtonStyle(activeSection === "logs")}
-          onClick={() => goToSection("logs")}
-        >
-          Logs
-        </button>
-      </aside>
-
-      <div style={mainAreaStyle}>
-        <header style={topbarStyle}>
-          {isMobile && (
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              style={{
-                background: "#181818",
-                color: "white",
-                border: "1px solid #333",
-                padding: "8px 12px",
-                borderRadius: "8px",
-                cursor: "pointer",
-                fontSize: "18px",
-              }}
-            >
-              ☰
-            </button>
-          )}
-
-          <div style={{ fontWeight: "bold", letterSpacing: "0.5px" }}>
-            Asset Monitoring and Management Dashboard
-          </div>
-
+    <>
+      {toast && <div style={toastStyle(toast.type)}>{toast.message}</div>}
+      <div style={appShellStyle}>
+        {isMobile && sidebarOpen && (
           <div
+            onClick={() => setSidebarOpen(false)}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              flexWrap: "wrap",
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              background: "rgba(0,0,0,0.55)",
+              zIndex: 998,
             }}
+          />
+        )}
+
+        <aside style={sidebarStyle}>
+          <div style={brandStyle}>
+            <img
+              src={locateitLogo}
+              alt="LocateIT logo"
+              style={brandLogoStyle}
+            />
+          </div>
+
+          <button
+            style={navButtonStyle(activeSection === "dashboard")}
+            onClick={() => goToSection("dashboard")}
           >
-            <span style={{ opacity: 0.85 }}>Logged in as {username}</span>
-            <button
-              onClick={handleLogout}
+            <span style={navIconTextStyle}>
+              <LayoutDashboard size={18} />
+              Dashboard
+            </span>
+          </button>
+
+          <button
+            style={navButtonStyle(activeSection === "assets")}
+            onClick={() => goToSection("assets")}
+          >
+            <span style={navIconTextStyle}>
+              <Package size={18} />
+              Assets
+            </span>
+          </button>
+
+          <button
+            style={navButtonStyle(activeSection === "map")}
+            onClick={() => goToSection("map")}
+          >
+            <span style={navIconTextStyle}>
+              <Map size={18} />
+              Map View
+            </span>
+          </button>
+
+          <button
+            style={navButtonStyle(activeSection === "add")}
+            onClick={() => goToSection("add")}
+          >
+            <span style={navIconTextStyle}>
+              <PlusSquare size={18} />
+              Add Asset
+            </span>
+          </button>
+
+          <button
+            style={navButtonStyle(activeSection === "alerts")}
+            onClick={() => goToSection("alerts")}
+          >
+            <span style={navIconTextStyle}>
+              <Bell size={18} />
+              Alerts{" "}
+              {maintenanceAlerts.total > 0
+                ? `(${maintenanceAlerts.total})`
+                : ""}
+            </span>
+          </button>
+
+          <button
+            style={navButtonStyle(activeSection === "logs")}
+            onClick={() => goToSection("logs")}
+          >
+            <span style={navIconTextStyle}>
+              <ClipboardList size={18} />
+              Logs
+            </span>
+          </button>
+        </aside>
+
+        <div style={mainAreaStyle}>
+          <header style={topbarStyle}>
+            {isMobile && (
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                style={{
+                  background: "#181818",
+                  color: "white",
+                  border: "1px solid #333",
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                }}
+              >
+                ☰
+              </button>
+            )}
+
+            <div style={{ fontWeight: "bold", letterSpacing: "0.5px" }}>
+              Asset Monitoring and Management Dashboard
+            </div>
+
+            <div
               style={{
-                padding: "8px 14px",
-                borderRadius: "8px",
-                border: "1px solid #7f1d1d",
-                background: "#181818",
-                color: "white",
-                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
               }}
             >
-              Logout
-            </button>
-          </div>
-        </header>
+              <span style={{ opacity: 0.85 }}>Logged in as {username}</span>
+              <button
+                onClick={handleLogout}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid #7f1d1d",
+                  background: "#181818",
+                  color: "white",
+                  cursor: "pointer",
+                }}
+              >
+                Logout
+              </button>
+            </div>
+          </header>
 
-        <main ref={mainContentRef} style={contentStyle}>
-          {activeSection === "dashboard" && renderDashboard()}
-          {activeSection === "assets" && renderAssets()}
-          {activeSection === "map" && renderMap()}
-          {activeSection === "add" && renderAddAsset()}
-          {activeSection === "alerts" && renderAlerts()}
-          {activeSection === "logs" && renderLogs()}
-        </main>
+          <main ref={mainContentRef} style={contentStyle}>
+            {activeSection === "dashboard" && renderDashboard()}
+            {activeSection === "assets" && renderAssets()}
+            {activeSection === "map" && renderMap()}
+            {activeSection === "add" && renderAddAsset()}
+            {activeSection === "alerts" && renderAlerts()}
+            {activeSection === "logs" && renderLogs()}
+          </main>
+        </div>
       </div>
-    </div>
+
+      <footer style={footerStyle}>
+        <div style={footerLeftStyle}>
+          <img
+            src={uswLogo}
+            alt="University of South Wales logo"
+            style={uswLogoStyle}
+          />
+          <div>
+            <strong>University of South Wales</strong>
+            <div style={{ opacity: 0.75 }}>Prifysgol De Cymru</div>
+          </div>
+        </div>
+
+        <div style={footerCenterStyle}>
+          <strong>LocateIT Asset Monitoring and Management System</strong>
+          <div style={{ opacity: 0.75 }}>© 2026 All rights reserved.</div>
+        </div>
+
+        <div style={footerRightStyle}>
+          <strong>Developed by Sanuth Nathavitharana</strong>
+          <div style={{ opacity: 0.75 }}>Final Year Project</div>
+        </div>
+      </footer>
+    </>
   );
 }
 
@@ -1988,11 +2117,12 @@ const sectionTitleStyle = {
 };
 
 const statCardStyle = {
-  background: "#101010",
-  border: "1px solid #1f1f1f",
+  background: "linear-gradient(180deg, #121212 0%, #0c0c0c 100%)",
+  border: "1px solid #242424",
   borderRadius: "14px",
   padding: "18px",
   textAlign: "center",
+  boxShadow: "0 0 14px rgba(183,28,28,0.08)",
 };
 
 const statNumberStyle = {
@@ -2014,6 +2144,7 @@ const panelStyle = {
   border: "1px solid #1f1f1f",
   borderRadius: "14px",
   padding: "20px",
+  boxShadow: "0 0 18px rgba(0,0,0,0.25)",
 };
 
 const panelTitleStyle = {
@@ -2126,12 +2257,13 @@ const actionButtonStyle = {
   width: "100%",
   padding: "12px",
   borderRadius: "8px",
-  border: "1px solid #2a2a2a",
-  background: "#181818",
+  border: "1px solid #333",
+  background: "linear-gradient(180deg, #1b1b1b 0%, #121212 100%)",
   color: "white",
   fontWeight: "bold",
   cursor: "pointer",
   marginBottom: "10px",
+  transition: "0.2s ease",
 };
 
 const dangerButtonStyle = {
@@ -2216,4 +2348,124 @@ const qrBoxStyle = {
   background: "#080808",
   border: "1px solid #242424",
   display: "inline-block",
+};
+
+const brandLogoStyle = {
+  width: "190px",
+  height: "auto",
+  objectFit: "contain",
+  display: "block",
+  margin: "0 auto 8px auto",
+};
+const footerStyle = {
+  width: "100%",
+  borderTop: "1px solid #7f1d1d",
+  background: "linear-gradient(180deg, #080808 0%, #050505 100%)",
+  padding: "12px 24px",
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr 1fr",
+  gap: "12px",
+  alignItems: "center",
+  color: "#ffffff",
+  boxSizing: "border-box",
+  minHeight: "70px",
+};
+
+const footerLeftStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+  fontSize: "14px",
+};
+
+const uswLogoStyle = {
+  width: "42px",
+  height: "42px",
+  objectFit: "contain",
+  borderRadius: "4px",
+};
+
+const footerCenterStyle = {
+  textAlign: "center",
+  borderLeft: "1px solid #333",
+  borderRight: "1px solid #333",
+  padding: "0 14px",
+  fontSize: "14px",
+};
+
+const footerRightStyle = {
+  textAlign: "right",
+  fontSize: "14px",
+};
+
+const subtitleStyle = {
+  marginTop: "-12px",
+  marginBottom: "22px",
+  color: "#bdbdbd",
+  fontSize: "15px",
+};
+
+const navIconTextStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "12px",
+};
+
+const statIconBoxStyle = (color) => ({
+  width: "46px",
+  height: "46px",
+  borderRadius: "12px",
+  background: `${color}22`,
+  color: color,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  margin: "0 auto 10px auto",
+});
+
+const buttonIconTextStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "10px",
+};
+
+const toastStyle = (type) => ({
+  position: "fixed",
+  top: "20px",
+  right: "20px",
+  zIndex: 2000,
+  padding: "14px 18px",
+  borderRadius: "10px",
+  background: type === "error" ? "#2a0808" : "#082a14",
+  border: type === "error" ? "1px solid #e74c3c" : "1px solid #2ecc71",
+  color: "white",
+  fontWeight: "bold",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+});
+
+const loginLogoWrapStyle = {
+  textAlign: "center",
+  marginBottom: "14px",
+};
+
+const loginLogoStyle = {
+  width: "220px",
+  height: "auto",
+  objectFit: "contain",
+};
+
+const loginTitleStyle = {
+  marginTop: 0,
+  marginBottom: "8px",
+  textAlign: "center",
+  fontSize: "42px",
+  fontWeight: "bold",
+};
+
+const loginSubtitleStyle = {
+  textAlign: "center",
+  opacity: 0.7,
+  fontSize: "14px",
+  marginBottom: "22px",
 };
