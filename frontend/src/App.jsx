@@ -8,6 +8,8 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 
+import { QRCodeCanvas } from "qrcode.react";
+
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
@@ -103,6 +105,24 @@ export default function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    if (!assets.length) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const assetId = params.get("asset");
+
+    if (assetId) {
+      const foundAsset = assets.find((asset) => String(asset.id) === assetId);
+
+      if (foundAsset) {
+        setActiveSection("assets");
+        setSelectedId(foundAsset.id);
+        addActivity(`Asset opened from QR code: ${foundAsset.name}`, "view");
+        scrollToTop();
+      }
+    }
+  }, [assets]);
+
   function goToSection(section) {
     setActiveSection(section);
     if (isMobile) {
@@ -120,6 +140,10 @@ export default function App() {
     };
 
     setActivityLog((prev) => [newActivity, ...prev]);
+  }
+
+  function getAssetQrUrl(assetId) {
+    return `${window.location.origin}?asset=${assetId}`;
   }
 
   async function checkSession() {
@@ -1024,6 +1048,23 @@ export default function App() {
                 <strong>Notes:</strong>{" "}
                 {selectedAsset.notes || "No notes added"}
               </p>
+
+              <div style={qrBoxStyle}>
+                <p style={{ marginTop: 0, fontWeight: "bold" }}>
+                  Asset QR Code
+                </p>
+
+                <QRCodeCanvas
+                  value={getAssetQrUrl(selectedAsset.id)}
+                  size={140}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                />
+
+                <p style={{ fontSize: "12px", opacity: 0.75 }}>
+                  Scan to open this asset record.
+                </p>
+              </div>
 
               <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
                 <button
@@ -2167,3 +2208,12 @@ const alertRowStyle = (type) => ({
   color: "white",
   cursor: "pointer",
 });
+
+const qrBoxStyle = {
+  marginTop: "16px",
+  padding: "14px",
+  borderRadius: "12px",
+  background: "#080808",
+  border: "1px solid #242424",
+  display: "inline-block",
+};
