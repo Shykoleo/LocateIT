@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react"; //React Hooks (Help Manage Data, Load Data when the app starts, calculate filtered results, control the map)
 import {
   MapContainer,
   TileLayer,
   Marker,
   Popup,
   useMapEvents,
-} from "react-leaflet";
+} from "react-leaflet"; //To create the interactive map
 import L from "leaflet";
 
-import { QRCodeCanvas } from "qrcode.react";
+import { QRCodeCanvas } from "qrcode.react"; //To generate QR Codes for each asset
 
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
@@ -33,7 +33,7 @@ import {
   FileText,
   Download,
   FileSpreadsheet,
-} from "lucide-react";
+} from "lucide-react"; //icons for dashboard, map, assets, alerts, logs and buttons
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -64,13 +64,13 @@ function MapClickHandler({ setNewAsset }) {
   return null;
 }
 
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+export default function App() { //The application uses useState to store important data
+  const [isAuthenticated, setIsAuthenticated] = useState(false); //to check whether the user is logged in
   const [authLoading, setAuthLoading] = useState(true);
   const [username, setUsername] = useState("");
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
 
-  const [assets, setAssets] = useState([]);
+  const [assets, setAssets] = useState([]); //stores all asset records loaded from the backend
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedId, setSelectedId] = useState(null);
@@ -82,11 +82,11 @@ export default function App() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [buildingFilter, setBuildingFilter] = useState("all");
 
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768); //to make it mobile responsive
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const [newAsset, setNewAsset] = useState({
+  const [newAsset, setNewAsset] = useState({ //The variables when adding a new asset
     name: "",
     asset_tag: "",
     asset_type: "",
@@ -109,8 +109,10 @@ export default function App() {
   const markerRefs = useRef({});
   const mainContentRef = useRef(null);
 
-  useEffect(() => {
-    checkSession();
+  //session based authentication so only logged on staff can access the system 
+
+  useEffect(() => { //When the application loads this run to check if the user has a valid session
+    checkSession(); //calls the backend endpoint
   }, []);
 
   useEffect(() => {
@@ -252,7 +254,7 @@ export default function App() {
       setErrorMsg("");
 
       const res = await fetch("http://127.0.0.1:8000/api/assets/", {
-        credentials: "include",
+        credentials: "include", //This is basically the same as writing the method:"GET" - so in javascript we dont specify a method, it defaults to GET
       });
 
       if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -467,7 +469,7 @@ export default function App() {
       showToast("Failed to update asset details.", "error");
     }
   }
-  async function addAsset(e) {
+  async function addAsset(e) { //CREATE - sends a POST request
     e.preventDefault();
 
     const lat = parseFloat(newAsset.latitude);
@@ -676,6 +678,7 @@ export default function App() {
     addActivity("Exported assets CSV report", "export");
   }
 
+  //export logs as a CSV function
   function exportLogsCSV() {
     const rows = activityLog.map((log) => ({
       id: log.id,
@@ -2072,7 +2075,7 @@ export default function App() {
 
         <div style={footerRightStyle}>
           <strong>Developed by Sanuth Nathavitharana</strong>
-          <div style={{ opacity: 0.75 }}>Final Year Project</div>
+          <div style={{ opacity: 0.75 }}>30138926</div>
         </div>
       </footer>
     </>
